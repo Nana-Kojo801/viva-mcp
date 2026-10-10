@@ -70,13 +70,13 @@ export async function createDeck(
       ...cards.map((c, i) => ({
         sql: `INSERT INTO cards (id, deck_id, user_id, front, back, topic, source_excerpt, due_at, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        // Stagger due_at by a millisecond so new cards come up in the order they were written.
-        args: [c.id, deckId, userId, c.front, c.back, c.topic, c.source_excerpt, now + i, now],
+        // Stagger due_at by a millisecond (into the past, so all are due now) to keep the order they were written in.
+        args: [c.id, deckId, userId, c.front, c.back, c.topic, c.source_excerpt, now - cards.length + i, now],
       })),
     ],
     "write",
   );
-  cards.forEach((c, i) => (c.due_at = now + i));
+  cards.forEach((c, i) => (c.due_at = now - cards.length + i));
   return { deckId, cards };
 }
 

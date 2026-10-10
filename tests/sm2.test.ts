@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DAY_MS, MIN_EASE, review, verdictToQuality, type SchedulingState } from "../src/lib/sm2";
+import { DAY_MS, MIN_EASE, RELEARN_MS, review, verdictToQuality, type SchedulingState } from "../src/lib/sm2";
 
 const fresh: SchedulingState = { ease: 2.5, interval_days: 0, repetitions: 0, lapses: 0 };
 const NOW = 1_700_000_000_000;
@@ -26,7 +26,7 @@ describe("review", () => {
     expect(after.repetitions).toBe(0);
     expect(after.interval_days).toBe(1);
     expect(after.lapses).toBe(1);
-    expect(after.due_at).toBe(NOW + DAY_MS);
+    expect(after.due_at).toBe(NOW + RELEARN_MS);
   });
 
   it("updates ease with the SM-2 formula", () => {
@@ -40,6 +40,10 @@ describe("review", () => {
     let s: SchedulingState = { ...fresh, ease: 1.35 };
     for (let i = 0; i < 5; i++) s = review(s, 0, NOW);
     expect(s.ease).toBe(MIN_EASE);
+  });
+
+  it("brings a wrong answer on a new card back sooner than a right one", () => {
+    expect(review(fresh, 1, NOW).due_at).toBeLessThan(review(fresh, 5, NOW).due_at);
   });
 
   it("brings a wrong answer back sooner than a right one", () => {

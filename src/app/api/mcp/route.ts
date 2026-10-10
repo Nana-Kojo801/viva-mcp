@@ -1,4 +1,5 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { ensureSchema } from "@/lib/db";
 import { createVivaServer } from "@/lib/mcp/server";
 
 export const runtime = "nodejs";
@@ -40,6 +41,13 @@ async function handle(req: Request): Promise<Response> {
       status: 401,
       headers: { ...CORS, "Content-Type": "application/json", "WWW-Authenticate": 'Bearer realm="viva"' },
     });
+  }
+
+  try {
+    await ensureSchema();
+  } catch (err) {
+    // Tools report a friendly "not configured" message if the database is unreachable.
+    console.error("[mcp] schema setup failed", err instanceof Error ? err.message : err);
   }
 
   // Stateless: a fresh server and transport per request, no session ids.

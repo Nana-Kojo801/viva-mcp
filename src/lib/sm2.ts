@@ -11,6 +11,8 @@ export type ScheduledState = SchedulingState & { due_at: number };
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const MIN_EASE = 1.3;
+/** A missed card keeps SM-2's 1-day interval but is shown again after this relearning step, later in the same session. */
+export const RELEARN_MS = 10 * 60 * 1000;
 
 export function review(state: SchedulingState, quality: number, now: number = Date.now()): ScheduledState {
   if (!Number.isInteger(quality) || quality < 0 || quality > 5) {
@@ -36,7 +38,7 @@ export function review(state: SchedulingState, quality: number, now: number = Da
     interval_days: round(interval_days, 4),
     repetitions,
     lapses,
-    due_at: now + Math.round(interval_days * DAY_MS),
+    due_at: quality < 3 ? now + RELEARN_MS : now + Math.round(interval_days * DAY_MS),
   };
 }
 

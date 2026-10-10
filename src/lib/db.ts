@@ -15,3 +15,17 @@ export function db(): Client {
 export function newId(): string {
   return crypto.randomUUID();
 }
+
+let schemaReady: Promise<void> | null = null;
+
+/** Apply the idempotent schema once per server instance, so a fresh database works without running db:setup. */
+export function ensureSchema(): Promise<void> {
+  schemaReady ??= (async () => {
+    const { SCHEMA } = await import("./schema");
+    await db().batch(SCHEMA, "write");
+  })().catch((err) => {
+    schemaReady = null;
+    throw err;
+  });
+  return schemaReady;
+}
