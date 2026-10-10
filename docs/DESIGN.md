@@ -96,9 +96,27 @@ Loading states are drawn from the same motifs as the rest of the app, not spinne
 
 All of these stop moving under `prefers-reduced-motion`.
 
-## Motion budget
+## Motion
 
-Only the reading line and the mark move. There are no page transitions, scroll fades, or hover animations. Buttons change color instantly.
+The first version kept motion to the reading line and the mark. After testing on a phone, the builder asked for a more finished, more animated product, so motion now does more work. It still follows the same rules: every movement either explains something or acknowledges a touch, and the reading line and the mark stay the loudest moments.
+
+- **Arrival:** each screen's content rises in with a short stagger. Question words settle in one by one, slightly blurred, before Viva starts reading. The "out loud" highlighter swipes in on the start screen, and the wordmark underline draws itself.
+- **Navigation:** the tabs slide left or right by their order (Quiz, Notes, Progress) through React `<ViewTransition>`, while the background crossfades between cobalt and paper. The tab indicator springs to the active tab.
+- **Voice:** the mic halos pulse gently before a session to invite the first tap. While listening, rings ripple outward faster and wider as your voice gets louder.
+- **Marking:** the examiner's mark stamps in (scale and rotate), then strokes on. A matching mini mark pops into the session strip.
+- **Follow-ups:** hints and notices slide in from the margin. The explanation card rises with a slight spring. A chalk line drains toward the next question, and "Stay here" stops it.
+- **Records:** progress numbers count up. Tally strokes draw one after another, day by day. Volume lines and weak-topic bars grow from the left. Deleted cards slide away, and the gap closes behind them.
+- **Touch:** buttons, tools, and the mic press down slightly. On a pointer device, arrows nudge forward on hover.
+
+Everything honours `prefers-reduced-motion`: animations collapse to their end state, and the rings, spinner, and scan line are hidden.
+
+## Production polish
+
+- Paper grain over every screen, and a soft same-hue vignette on cobalt (no gradients between hues).
+- A custom stroke icon set (mic, page, tally, hint, repeat, skip, shrug, explain, calendar, camera) in one consistent hand.
+- Mobile: a frosted tab bar with icons. Desktop (1100px and wider): a floating centered pill, and the quiz controls become a floating dock.
+- The quiz controls are compact: a row of tools above the mic, with Type and End beside it. They sit on frosted cobalt, so text scrolling underneath never shows through.
+- The notes screen has one sheet with a paste / photo / file switch, a ruled textarea with a margin line, a photo preview with a highlighter scan while it is read, and a deck list with inline exam dates.
 
 ## Review against the brief
 

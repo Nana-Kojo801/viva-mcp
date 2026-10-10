@@ -27,7 +27,9 @@ Both parts share one Turso database.
                   │  transport (stateless, one per request)      │
                   │   tools: list_decks, add_material,           │
                   │   get_next_card, submit_answer,              │
-                  │   get_progress, set_exam_date, delete_card   │
+                  │   get_progress, set_exam_date, delete_card,  │
+                  │   get_hint, explain_again, get_study_nudge,  │
+                  │   read_notes_photo                           │
                   │      │                │                      │
                   │  src/lib/ai.ts    src/lib/sm2.ts             │
                   │  (OpenAI, zod,    (SM-2, plain code)         │
@@ -45,11 +47,15 @@ Every tool returns structured data plus a `spoken` string written for text-to-sp
 |---|---|---|
 | `list_decks` | none | The user's decks with card and due counts. |
 | `add_material` | `title`, `text`, optional `exam_date` | Generates cards from notes with AI and saves a deck. Returns the card count, topics, and cards. |
-| `get_next_card` | optional `deck_id`, `study_ahead`, `exclude_card_ids` | The next due card's **front only**, plus its id. If nothing is due, it says so and offers to study ahead. |
-| `submit_answer` | `card_id`, `answer` | AI grades the transcribed answer and updates the SM-2 schedule. Returns the verdict and spoken feedback, plus the correct answer if the user was wrong. "I don't know" is graded without an AI call. |
+| `get_next_card` | optional `deck_id`, `study_ahead`, `exclude_card_ids` | The next card's **front only**, plus its id and a `reason`. Unanswered prerequisite cards come first. When a deck's exam is within 21 days, due cards from the weakest topics are pulled forward, more strongly as the exam gets closer. If nothing is due, it says so and offers to study ahead. |
+| `submit_answer` | `card_id`, `answer`, optional `hints_used` | AI grades the transcribed answer and updates the SM-2 schedule. Returns the verdict and spoken feedback, plus the correct answer if the user was wrong. A correct answer that needed hints scores lower. After a card is missed twice, the result sets `suggest_explain`. "I don't know" is graded without an AI call. |
 | `get_progress` | optional `deck_id`, `timezone` | Streak, cards due today, 7-day accuracy, a per-day tally for the week, and the weakest topics. |
 | `set_exam_date` | `deck_id`, `date` (ISO) | Stores the exam date. |
 | `delete_card` | `card_id` | Deletes a bad card. The notes screen uses this. |
+| `get_hint` | `card_id`, optional `level` (1–3) | A hint ladder: a nudge, then a strong cue, then part of the answer. All three hints come from one AI call and are stored on the card, so they are never regenerated. |
+| `explain_again` | `card_id` | Re-explains a missed card from a different angle, with an everyday example, and adds an easier prerequisite card to the deck that comes up next. Generated once per card. |
+| `get_study_nudge` | optional `deck_id`, `timezone` | A short proactive suggestion based on the nearest exam date, cards due, the streak, and the weakest topic. It is spoken when a quiz session starts. No AI is used. |
+| `read_notes_photo` | `image` (JPEG, PNG or WebP data URL) | Transcribes a photo of handwritten or printed notes into text, ready for `add_material`. The web app downscales photos before sending them. |
 
 Tool errors (budget reached, unknown card, AI unavailable) come back as `isError: true` results with a friendly spoken message, plus a machine-readable code in `_meta["viva/error"]`. Raw exceptions are never returned.
 
@@ -90,8 +96,12 @@ The quiz screen plays the part of an Alexa+ device:
    - **Voice:** with `GOOGLE_TTS_API_KEY` set, speech comes from Google Cloud Text-to-Speech (a Chirp 3 HD voice) through `/api/tts`, and is played with Web Audio. The highlighter is timed against the audio clock: it uses exact word timings for voices that report them and estimates them from the audio length for the others. Identical sentences are cached by the CDN.
    - **Fallback:** without the key, or when the daily voice budget is spent, the browser's `speechSynthesis` speaks instead, driven by boundary events or a conservative timed sweep. `/api/tts` is only the simulated device's speaker; all study logic goes through MCP.
 2. Tap the mic to answer. `SpeechRecognition` (or `webkitSpeechRecognition`) shows the live transcript. Recognition stops on silence or when you tap again. On desktop, the mic circle swells with the input level from a Web Audio analyser. On phones, it breathes with recognition events instead, because phones can't share the microphone between `getUserMedia` and speech recognition.
-3. The transcript is first checked for voice commands: **skip**, **repeat**, **I don't know**, **stop**, and **study ahead**. Anything else is sent to `submit_answer`.
-4. The examiner's mark (tick, partial circle, or cross) is drawn once. The `spoken` feedback is read aloud, and the next question follows automatically.
+3. The transcript is first checked for voice commands: **hint**, **repeat**, **skip**, **I don't know**, **explain**, **next**, **stop**, and **study ahead**. Anything else is sent to `submit_answer`.
+4. The examiner's mark (tick, partial circle, or cross) is drawn once, and the `spoken` feedback is read aloud.
+   - After a correct answer, the next question follows automatically.
+   - After a miss, a countdown gives you time to say "explain" first.
+   - When a card keeps being missed, the explain button is highlighted and the session waits for you.
+5. The first tap of a session speaks the `get_study_nudge` suggestion, for example "Your exam is in 5 days. Elasticity needs the most work, so I'll start there." Ending a session shows a summary with a tally of correct answers.
 
 Fallbacks: if speech recognition isn't available (for example, some iPhone browsers), or the microphone is blocked, a text box appears, and questions are still read aloud. "No speech", network failures, and the daily demo limit each show a plain message that says what to do next.
 
