@@ -92,7 +92,7 @@ sequenceDiagram
   M->>O: grade (strict JSON, zod-validated)
   M->>D: SM-2 update + review row
   M-->>B: verdict, feedback, spoken
-  B->>U: draws the examiner's mark, speaks the feedback
+  B->>U: stamps the card, speaks the feedback
 ```
 
 ## MCP tools
@@ -227,7 +227,7 @@ The quiz screen plays the part of an Alexa+ device:
    - **Fallback:** without the key, or when the daily voice budget is spent, the browser's `speechSynthesis` speaks instead, driven by boundary events or a conservative timed sweep. `/api/tts` is only the simulated device's speaker; all study logic goes through MCP.
 2. Tap the mic to answer. `SpeechRecognition` (or `webkitSpeechRecognition`) shows the live transcript. Recognition stops on silence or when you tap again. On desktop, the mic circle swells with the input level from a Web Audio analyser. On phones, it breathes with recognition events instead, because phones can't share the microphone between `getUserMedia` and speech recognition.
 3. The transcript is first checked for voice commands: **hint**, **repeat**, **skip**, **I don't know**, **explain**, **next**, **stop**, and **study ahead**. Anything else is sent to `submit_answer`.
-4. The examiner's mark (tick, partial circle, or cross) is drawn once, and the `spoken` feedback is read aloud.
+4. The examiner's rubber stamp (correct, partly, or missed) thumps onto the card, and the `spoken` feedback is read aloud.
    - After a correct answer, the next question follows automatically.
    - After a miss, a countdown gives you time to say "explain" first.
    - When a card keeps being missed, the explain button is highlighted and the session waits for you.

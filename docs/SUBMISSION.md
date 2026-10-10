@@ -21,7 +21,7 @@ Saying an answer out loud is one of the best ways to remember it, and it's how a
 
 - **Bring your own material.** Paste notes, upload a PDF, Word document or slide deck (speaker notes included), or take a photo of handwritten notes. Viva writes 8 to 20 questions per section that can be answered aloud in a sentence or two. You review them and delete any you don't want.
 - **Get quizzed out loud.** Viva reads each question with a natural voice while a highlighter follows the words. You answer in your own words, and Viva grades the meaning rather than exact wording, so filler words and transcription slips don't count against you.
-  - It draws an examiner's tick, partial circle or cross, says what you got and what you missed, and moves on.
+  - It stamps the card (correct, partly or missed), says what you got and what you missed, and moves on.
   - Say **hint** for up to three increasingly revealing hints.
   - Say **explain** after a miss, and Viva explains it another way and adds an easier building-block card.
   - **Skip**, **repeat**, **I don't know** and **stop** work too.
@@ -53,7 +53,7 @@ Viva is **a real MCP server and a simulated Alexa+ experience that uses it**:
 ## Accomplishments
 
 - One codebase that is a standards-compliant MCP server *and* a polished voice product, with the simulation provably using the same protocol.
-- A design that doesn't look like a template: an oral exam made tactile, with a deep-cobalt exam room, a reading-line highlighter, hand-drawn examiner's marks, and a tally-mark progress ledger.
+- A design that doesn't look like a template: a study desk you can hold. Questions are typed on index cards with a highlighter following the voice, your answers appear in blue pen, hints are sticky notes, grades are rubber stamps, and the week is a row of index cards with tally marks.
 - Real support for students' actual material: PDFs, slide decks with speaker notes, and photos of handwriting.
 
 ## What we learned
