@@ -3,10 +3,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 process.env.TURSO_DATABASE_URL = ":memory:";
 process.env.AI_DAILY_CALL_CAP = "3";
 process.env.AI_SESSION_DAILY_CAP = "2";
+process.env.TTS_DAILY_CHAR_CAP = "100";
 
 const { db } = await import("../src/lib/db");
 const { SCHEMA } = await import("../src/lib/schema");
-const { spendAiCall, BudgetError } = await import("../src/lib/budget");
+const { spendAiCall, spendTtsChars, BudgetError } = await import("../src/lib/budget");
 const { chunkNotes, CHUNK_CHARS, MAX_NOTES_CHARS } = await import("../src/lib/ai");
 
 beforeAll(async () => {
@@ -23,6 +24,15 @@ describe("spendAiCall", () => {
   it("enforces the global cap and does not leak a refused user call", async () => {
     await spendAiCall("b"); // global now 3
     await expect(spendAiCall("c")).rejects.toBeInstanceOf(BudgetError);
+  });
+});
+
+describe("spendTtsChars", () => {
+  it("stops at the daily character cap without overshooting", async () => {
+    expect(await spendTtsChars(60)).toBe(true);
+    expect(await spendTtsChars(50)).toBe(false);
+    expect(await spendTtsChars(40)).toBe(true);
+    expect(await spendTtsChars(1)).toBe(false);
   });
 });
 

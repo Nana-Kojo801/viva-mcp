@@ -42,3 +42,16 @@ export async function spendAiCall(userId: string): Promise<void> {
     throw new BudgetError();
   }
 }
+
+/** Reserve `chars` from the global daily text-to-speech budget. Returns false when it would go over. */
+export async function spendTtsChars(chars: number): Promise<boolean> {
+  const limit = cap("TTS_DAILY_CHAR_CAP", 30_000);
+  if (chars > limit) return false;
+  const rs = await db().execute({
+    sql: `INSERT INTO usage (day, scope, calls) VALUES (?, 'tts_chars', ?)
+          ON CONFLICT(day, scope) DO UPDATE SET calls = calls + ? WHERE calls + ? <= ?
+          RETURNING calls`,
+    args: [today(), chars, chars, chars, limit],
+  });
+  return rs.rows.length > 0;
+}
