@@ -260,7 +260,7 @@ const explanationJsonSchema = {
 
 const EXPLAIN_PROMPT = `A student keeps missing a flashcard. Help them from a different angle.
 
-explanation: two or three short spoken sentences that explain the answer differently from the card, using a simple everyday example or analogy. Plain sentences for text-to-speech, no markdown, no lists. Address the student as "you".
+explanation: two short spoken sentences that explain the answer differently from the card, using a simple everyday example or analogy. Plain sentences for text-to-speech, no markdown, no lists. Address the student as "you".
 prerequisite: one easier flashcard about the building block the student needs first, in the same format as the original (front is a question answerable aloud in one sentence, back is concise, topic matches the original card's topic, source_excerpt is a short phrase from the original answer). It must not be a copy of the original question.`;
 
 export async function explainAgain(
