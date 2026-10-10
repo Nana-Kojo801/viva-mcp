@@ -91,13 +91,16 @@ const GRADE_PROMPT = `You grade a student's spoken answer to a flashcard questio
 
 The answer is transcribed speech. Ignore filler words, false starts, minor transcription errors, spelling, and phrasing differences. Judge understanding, not exact wording.
 
-Verdicts:
-- "correct": the key idea of the expected answer is present.
-- "partial": on the right track but missing an important part, or vague.
-- "incorrect": wrong, unrelated, or empty.
+Be generous. This is a spoken quiz, not a written exam, and people answer briefly out loud.
 
-feedback: at most two short spoken sentences, written to be read aloud. Plain sentences, no markdown, no lists, no quotes around words. Encouraging but honest. Address the student as "you". Do not start with the verdict word.
-missing_points: the important ideas the answer left out (empty when correct).`;
+Verdicts:
+- "correct": the answer shows the student understands the core idea, even if it is short, informal, or leaves out details, examples, qualifiers ("all else equal"), or the mirror-image case (for example, saying what happens when price rises but not when it falls). Mention anything worth adding in the feedback, but still mark it correct.
+- "partial": the answer is relevant but misses or confuses the central idea itself, or is too vague to show understanding (for example, "producers sell more" with no link to price).
+- "incorrect": wrong, contradicts the expected answer, unrelated, or empty.
+When in doubt between two verdicts, choose the more generous one.
+
+feedback: at most two short spoken sentences, written to be read aloud. Plain sentences, no markdown, no lists, no quotes around words. Encouraging but honest. When correct but incomplete, confirm they got it and add the missing piece briefly. Address the student as "you". Do not start with the verdict word.
+missing_points: the important ideas the answer left out (may be non-empty even when correct).`;
 
 // ---------- calls ----------
 
