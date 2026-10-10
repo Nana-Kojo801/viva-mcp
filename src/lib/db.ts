@@ -21,8 +21,19 @@ let schemaReady: Promise<void> | null = null;
 /** Apply the idempotent schema once per server instance, so a fresh database works without running db:setup. */
 export function ensureSchema(): Promise<void> {
   schemaReady ??= (async () => {
-    const { SCHEMA } = await import("./schema");
+    const { SCHEMA, ADDED_COLUMNS } = await import("./schema");
     await db().batch(SCHEMA, "write");
+    for (const { table, column, type } of ADDED_COLUMNS) {
+      const cols = await db().execute(`PRAGMA table_info(${table})`);
+      if (!cols.rows.some((r) => r.name === column)) {
+        try {
+          await db().execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+        } catch (err) {
+          // Another instance may have added it at the same moment.
+          if (!/duplicate column/i.test(String(err))) throw err;
+        }
+      }
+    }
   })().catch((err) => {
     schemaReady = null;
     throw err;

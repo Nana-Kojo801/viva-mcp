@@ -108,6 +108,8 @@ async function structured<T>(opts: {
   userId: string;
   system: string;
   user: string;
+  /** Optional image (data URL) sent with the user message, for vision calls. */
+  image?: string;
   name: string;
   jsonSchema: Record<string, unknown>;
   schema: z.ZodType<T>;
@@ -122,7 +124,13 @@ async function structured<T>(opts: {
         model: process.env.OPENAI_MODEL || DEFAULT_MODEL,
         messages: [
           { role: "system", content: opts.system },
-          { role: "user", content: attempt === 0 ? opts.user : `${opts.user}\n\nYour previous output was invalid (${lastProblem}). Follow the schema exactly.` },
+          {
+            role: "user",
+            content: [
+              { type: "text" as const, text: attempt === 0 ? opts.user : `${opts.user}\n\nYour previous output was invalid (${lastProblem}). Follow the schema exactly.` },
+              ...(opts.image ? [{ type: "image_url" as const, image_url: { url: opts.image, detail: "high" as const } }] : []),
+            ],
+          },
         ],
         response_format: {
           type: "json_schema",
@@ -200,5 +208,100 @@ export async function gradeAnswer(
     name: "grade",
     jsonSchema: gradeJsonSchema,
     schema: Grade,
+  });
+}
+
+// ---------- phase 2: hints, re-explanations, photos of notes ----------
+
+export const Hints = z.object({ hints: z.array(z.string().trim().min(1).max(240)).length(3) });
+
+const hintsJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["hints"],
+  properties: { hints: { type: "array", items: { type: "string" } } },
+} as const;
+
+const HINTS_PROMPT = `You write a three-step hint ladder for a flashcard that a student answers out loud.
+
+Return exactly three hints, each one sentence, written to be read aloud (no markdown, no symbols):
+1. A gentle nudge: point to the right area of thinking without using the answer's key words.
+2. A stronger cue: name a related idea, the kind of answer expected, or the first word or letter of a key term.
+3. Almost there: give part of the answer and leave the rest for the student to finish.
+Never state the full answer.`;
+
+export async function generateHints(card: { front: string; back: string }, userId: string): Promise<string[]> {
+  const out = await structured({
+    userId,
+    system: HINTS_PROMPT,
+    user: `Question: ${card.front}\nAnswer: ${card.back}`,
+    name: "hints",
+    jsonSchema: hintsJsonSchema,
+    schema: Hints,
+  });
+  return out.hints;
+}
+
+export const Explanation = z.object({
+  explanation: z.string().trim().min(1).max(600),
+  prerequisite: CardDraft,
+});
+export type Explanation = z.infer<typeof Explanation>;
+
+const explanationJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["explanation", "prerequisite"],
+  properties: {
+    explanation: { type: "string" },
+    prerequisite: cardsJsonSchema.properties.cards.items,
+  },
+} as const;
+
+const EXPLAIN_PROMPT = `A student keeps missing a flashcard. Help them from a different angle.
+
+explanation: two or three short spoken sentences that explain the answer differently from the card, using a simple everyday example or analogy. Plain sentences for text-to-speech, no markdown, no lists. Address the student as "you".
+prerequisite: one easier flashcard about the building block the student needs first, in the same format as the original (front is a question answerable aloud in one sentence, back is concise, topic matches the original card's topic, source_excerpt is a short phrase from the original answer). It must not be a copy of the original question.`;
+
+export async function explainAgain(
+  card: { front: string; back: string; topic: string },
+  lastAnswer: string | null,
+  userId: string,
+): Promise<Explanation> {
+  return structured({
+    userId,
+    system: EXPLAIN_PROMPT,
+    user: `Question: ${card.front}\nAnswer: ${card.back}\nTopic: ${card.topic}${lastAnswer ? `\nThe student's last answer: ${lastAnswer.slice(0, MAX_ANSWER_CHARS)}` : ""}`,
+    name: "explanation",
+    jsonSchema: explanationJsonSchema,
+    schema: Explanation,
+  });
+}
+
+export const NotesPhoto = z.object({
+  legible: z.boolean(),
+  text: z.string().max(MAX_NOTES_CHARS),
+});
+
+const notesPhotoJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["legible", "text"],
+  properties: { legible: { type: "boolean" }, text: { type: "string" } },
+} as const;
+
+const PHOTO_PROMPT = `Transcribe the study notes in this photo, handwritten or printed, into plain text.
+Keep the student's wording and order. Turn bullet points into separate lines. Describe diagrams in one short sentence in square brackets. Skip doodles and page decoration. Fix obvious spelling slips but do not add facts.
+Set legible to false and text to an empty string if the photo has no readable notes.`;
+
+export async function readNotesPhoto(imageDataUrl: string, userId: string): Promise<z.infer<typeof NotesPhoto>> {
+  return structured({
+    userId,
+    system: PHOTO_PROMPT,
+    user: "Transcribe these notes.",
+    image: imageDataUrl,
+    name: "notes_photo",
+    jsonSchema: notesPhotoJsonSchema,
+    schema: NotesPhoto,
   });
 }

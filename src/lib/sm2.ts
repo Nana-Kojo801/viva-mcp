@@ -51,8 +51,13 @@ export function isHesitant(answer: string): boolean {
   return HESITATION.test(answer);
 }
 
-export function verdictToQuality(verdict: Verdict, answer = ""): number {
-  if (verdict === "correct") return isHesitant(answer) ? 4 : 5;
+/** Map a verdict to SM-2 quality. Hints count against a correct answer: one hint caps it at 4, two or more at 3. */
+export function verdictToQuality(verdict: Verdict, answer = "", hintsUsed = 0): number {
+  if (verdict === "correct") {
+    if (hintsUsed >= 2) return 3;
+    if (hintsUsed === 1) return 4;
+    return isHesitant(answer) ? 4 : 5;
+  }
   if (verdict === "partial") return 3;
   return 1;
 }

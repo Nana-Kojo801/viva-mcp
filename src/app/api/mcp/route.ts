@@ -55,6 +55,8 @@ async function handle(req: Request): Promise<Response> {
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
+    // Room for a compressed photo of notes (read_notes_photo); Vercel caps request bodies at 4.5 MB.
+    maxRequestBodySize: 4_500_000,
   });
   try {
     await server.connect(transport);

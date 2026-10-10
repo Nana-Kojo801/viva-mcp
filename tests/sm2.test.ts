@@ -65,4 +65,9 @@ describe("verdictToQuality", () => {
     expect(verdictToQuality("partial")).toBe(3);
     expect(verdictToQuality("incorrect")).toBe(1);
   });
+
+  it("lowers a correct answer that needed hints", () => {
+    expect(verdictToQuality("correct", "supply rises", 1)).toBe(4);
+    expect(verdictToQuality("correct", "supply rises", 3)).toBe(3);
+  });
 });

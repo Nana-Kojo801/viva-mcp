@@ -16,6 +16,9 @@ export type Card = {
   repetitions: number;
   lapses: number;
   due_at: number;
+  hints: string[] | null;
+  explanation: string | null;
+  parent_card_id: string | null;
 };
 
 export type DeckSummary = {
@@ -60,6 +63,9 @@ export async function createDeck(
     repetitions: 0,
     lapses: 0,
     due_at: now,
+    hints: null,
+    explanation: null,
+    parent_card_id: null,
   }));
   await db().batch(
     [
@@ -122,7 +128,20 @@ function toCard(r: Row): Card {
     repetitions: Number(r.repetitions),
     lapses: Number(r.lapses),
     due_at: Number(r.due_at),
+    hints: parseHints(r.hints),
+    explanation: r.explanation == null ? null : String(r.explanation),
+    parent_card_id: r.parent_card_id == null ? null : String(r.parent_card_id),
   };
+}
+
+function parseHints(v: unknown): string[] | null {
+  if (v == null) return null;
+  try {
+    const h = JSON.parse(String(v));
+    return Array.isArray(h) && h.every((x) => typeof x === "string") ? h : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getCard(userId: string, cardId: string): Promise<Card | null> {
@@ -130,45 +149,156 @@ export async function getCard(userId: string, cardId: string): Promise<Card | nu
   return rs.rows[0] ? toCard(rs.rows[0]) : null;
 }
 
+/** How many days ahead an exam starts to pull weak topics forward. */
+export const EXAM_WINDOW_DAYS = 21;
+
 /**
- * The most overdue card. With `ahead`, the soonest card even if it is not due yet.
- * `exclude` skips cards already passed over in this session.
+ * Pick the next card. Order of preference:
+ * 1. an easier prerequisite card added by explain_again, until it is first answered,
+ * 2. when a deck's exam is within EXAM_WINDOW_DAYS, due cards from the user's weakest topics,
+ *    weighted more heavily the closer the exam is,
+ * 3. otherwise the most overdue card.
+ * With `ahead`, the soonest card even if it is not due yet. `exclude` skips cards passed over this session.
  */
 export async function nextCard(
   userId: string,
   opts: { deckId?: string; ahead?: boolean; exclude?: string[] } = {},
   now = Date.now(),
-): Promise<{ card: Card | null; dueRemaining: number; nextDueAt: number | null }> {
+): Promise<{ card: Card | null; dueRemaining: number; nextDueAt: number | null; reason: "prerequisite" | "exam_focus" | "due" | "ahead" | null }> {
   const exclude = (opts.exclude ?? []).slice(0, 200);
-  const where = ["user_id = ?"];
+  const where = ["c.user_id = ?"];
   const args: (string | number)[] = [userId];
   if (opts.deckId) {
-    where.push("deck_id = ?");
+    where.push("c.deck_id = ?");
     args.push(opts.deckId);
   }
   if (exclude.length) {
-    where.push(`id NOT IN (${exclude.map(() => "?").join(",")})`);
+    where.push(`c.id NOT IN (${exclude.map(() => "?").join(",")})`);
     args.push(...exclude);
   }
   const base = where.join(" AND ");
-  const [pick, counts] = await db().batch(
+  const [candidates, counts, misses] = await db().batch(
     [
       {
-        sql: `SELECT * FROM cards WHERE ${base} ${opts.ahead ? "" : "AND due_at <= ?"} ORDER BY due_at ASC LIMIT 1`,
+        sql: `SELECT c.*, d.exam_date FROM cards c JOIN decks d ON d.id = c.deck_id
+              WHERE ${base} ${opts.ahead ? "" : "AND c.due_at <= ?"} ORDER BY c.due_at ASC LIMIT 60`,
         args: opts.ahead ? args : [...args, now],
       },
       {
-        sql: `SELECT COALESCE(SUM(CASE WHEN due_at <= ? THEN 1 ELSE 0 END), 0) AS due, MIN(due_at) AS next_due FROM cards WHERE ${base}`,
+        sql: `SELECT COALESCE(SUM(CASE WHEN c.due_at <= ? THEN 1 ELSE 0 END), 0) AS due, MIN(c.due_at) AS next_due FROM cards c WHERE ${base}`,
         args: [now, ...args],
+      },
+      {
+        sql: `SELECT c.topic,
+                     SUM(CASE r.verdict WHEN 'incorrect' THEN 1.0 WHEN 'partial' THEN 0.5 ELSE 0 END) / COUNT(*) AS miss_rate
+              FROM reviews r JOIN cards c ON c.id = r.card_id
+              WHERE r.user_id = ? AND r.created_at >= ?
+              GROUP BY c.topic`,
+        args: [userId, now - 14 * DAY_MS],
       },
     ],
     "read",
   );
   const c = counts.rows[0];
-  return {
-    card: pick.rows[0] ? toCard(pick.rows[0]) : null,
+  const result = (card: Card | null, reason: "prerequisite" | "exam_focus" | "due" | "ahead" | null) => ({
+    card,
     dueRemaining: Number(c?.due ?? 0),
     nextDueAt: c?.next_due == null ? null : Number(c.next_due),
+    reason,
+  });
+  if (!candidates.rows.length) return result(null, null);
+  if (opts.ahead) return result(toCard(candidates.rows[0]), "ahead");
+
+  // Prerequisites jump the queue only until they are first answered.
+  const prereq = candidates.rows.find((r) => r.parent_card_id != null && Number(r.repetitions) === 0 && Number(r.lapses) === 0);
+  if (prereq) return result(toCard(prereq), "prerequisite");
+
+  const missRate = new Map(misses.rows.map((r) => [String(r.topic), Number(r.miss_rate)]));
+  let best: { row: (typeof candidates.rows)[number]; score: number } | null = null;
+  for (const row of candidates.rows) {
+    const urgency = examUrgency(row.exam_date == null ? null : String(row.exam_date), now);
+    const score = urgency * (missRate.get(String(row.topic)) ?? 0);
+    if (score > 0 && (!best || score > best.score)) best = { row, score };
+  }
+  if (best) return result(toCard(best.row), "exam_focus");
+  return result(toCard(candidates.rows[0]), "due");
+}
+
+/** 0 when there is no exam in the window, rising to 1 on exam day. */
+export function examUrgency(examDate: string | null, now = Date.now()): number {
+  const days = daysUntil(examDate, now);
+  if (days == null || days < 0 || days > EXAM_WINDOW_DAYS) return 0;
+  return 1 - days / (EXAM_WINDOW_DAYS + 1);
+}
+
+/** Whole days from today (UTC) until an ISO date. Null when there is no date. */
+export function daysUntil(isoDate: string | null, now = Date.now()): number | null {
+  if (!isoDate) return null;
+  const target = Date.parse(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(target)) return null;
+  const today = Date.parse(`${new Date(now).toISOString().slice(0, 10)}T00:00:00Z`);
+  return Math.round((target - today) / DAY_MS);
+}
+
+export async function saveHints(userId: string, cardId: string, hints: string[]): Promise<void> {
+  await db().execute({
+    sql: "UPDATE cards SET hints = ? WHERE id = ? AND user_id = ?",
+    args: [JSON.stringify(hints), cardId, userId],
+  });
+}
+
+export async function lastAnswer(userId: string, cardId: string): Promise<string | null> {
+  const rs = await db().execute({
+    sql: "SELECT user_answer FROM reviews WHERE user_id = ? AND card_id = ? ORDER BY created_at DESC LIMIT 1",
+    args: [userId, cardId],
+  });
+  return rs.rows[0] ? String(rs.rows[0].user_answer) : null;
+}
+
+/** The prerequisite card already made for a card, if any. */
+export async function prerequisiteOf(userId: string, cardId: string): Promise<Card | null> {
+  const rs = await db().execute({
+    sql: "SELECT * FROM cards WHERE user_id = ? AND parent_card_id = ? ORDER BY created_at ASC LIMIT 1",
+    args: [userId, cardId],
+  });
+  return rs.rows[0] ? toCard(rs.rows[0]) : null;
+}
+
+/** Store a re-explanation and add the easier prerequisite card, due right away. */
+export async function saveExplanation(
+  userId: string,
+  card: Card,
+  explanation: string,
+  prereq: CardDraft,
+  now = Date.now(),
+): Promise<Card> {
+  const id = newId();
+  await db().batch(
+    [
+      { sql: "UPDATE cards SET explanation = ? WHERE id = ? AND user_id = ?", args: [explanation, card.id, userId] },
+      {
+        sql: `INSERT INTO cards (id, deck_id, user_id, front, back, topic, source_excerpt, due_at, created_at, parent_card_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, card.deck_id, userId, prereq.front, prereq.back, card.topic, prereq.source_excerpt, now, now, card.id],
+      },
+    ],
+    "write",
+  );
+  return {
+    id,
+    deck_id: card.deck_id,
+    front: prereq.front,
+    back: prereq.back,
+    topic: card.topic,
+    source_excerpt: prereq.source_excerpt,
+    ease: 2.5,
+    interval_days: 0,
+    repetitions: 0,
+    lapses: 0,
+    due_at: now,
+    hints: null,
+    explanation: null,
+    parent_card_id: card.id,
   };
 }
 

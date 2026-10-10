@@ -24,6 +24,7 @@ async function main() {
     return s ?? {};
   };
 
+  await call("get_study_nudge", { timezone: "America/Chicago" });
   const decks = await call("list_decks");
   const deckId = (decks.decks as { id: string }[])[0]?.id;
   const next = await call("get_next_card", { deck_id: deckId });

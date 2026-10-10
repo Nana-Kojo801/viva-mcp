@@ -46,3 +46,10 @@ export const SCHEMA: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_cards_deck ON cards(deck_id)`,
   `CREATE INDEX IF NOT EXISTS idx_reviews_user_time ON reviews(user_id, created_at)`,
 ];
+
+/** Columns added after the first release. Applied with ALTER TABLE when missing. */
+export const ADDED_COLUMNS: { table: string; column: string; type: string }[] = [
+  { table: "cards", column: "hints", type: "TEXT NULL" }, // JSON array of three hints, generated once
+  { table: "cards", column: "explanation", type: "TEXT NULL" }, // re-explanation, generated once
+  { table: "cards", column: "parent_card_id", type: "TEXT NULL" }, // set on prerequisite cards made by explain_again
+];

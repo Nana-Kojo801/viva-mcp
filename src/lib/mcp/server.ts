@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { AiError, generateCards, gradeAnswer, MAX_NOTES_CHARS } from "../ai";
+import { AiError, explainAgain, generateCards, generateHints, gradeAnswer, MAX_NOTES_CHARS, readNotesPhoto } from "../ai";
 import { BudgetError } from "../budget";
 import { ConfigError } from "../db";
 import { verdictToQuality } from "../sm2";
@@ -13,7 +13,9 @@ export const SERVER_INFO = { name: "viva", title: "Viva study companion", versio
 const INSTRUCTIONS = `Viva quizzes the user out loud on flashcards made from their own notes and schedules reviews with spaced repetition (SM-2).
 Typical voice loop: call get_next_card, read its "spoken" field aloud, listen to the user's answer, call submit_answer with the transcribed answer, read the "spoken" feedback aloud, then call get_next_card again.
 Every tool returns a short "spoken" string written for text-to-speech; prefer reading it verbatim.
-Never reveal the back of a card before the user answers. Use add_material when the user wants to study new notes.`;
+Never reveal the back of a card before the user answers. Use add_material when the user wants to study new notes.
+If the user is stuck, call get_hint (levels 1 to 3, each more revealing) and pass hints_used to submit_answer. After repeated misses, offer explain_again.
+At the start of a session, get_study_nudge gives a short spoken suggestion based on exam dates and weak topics.`;
 
 const isoDate = z
   .string()
@@ -151,6 +153,10 @@ export function createVivaServer(userId: string): McpServer {
         card: cardOut.nullable(),
         due_remaining: z.number(),
         next_due_at: z.number().nullable(),
+        reason: z
+          .enum(["prerequisite", "exam_focus", "due", "ahead"])
+          .nullable()
+          .describe("Why this card: an easier prerequisite, a weak topic pulled forward before an exam, simply due, or studying ahead."),
       },
       annotations: { readOnlyHint: true },
     },
@@ -165,7 +171,7 @@ export function createVivaServer(userId: string): McpServer {
           const spoken = r.nextDueAt
             ? speak("You are all caught up.", `The next card is due ${inDays(r.nextDueAt)}.`, "Say study ahead to keep going anyway.")
             : "There are no cards here yet. Add some notes first.";
-          return ok({ spoken, card: null, due_remaining: 0, next_due_at: r.nextDueAt });
+          return ok({ spoken, card: null, due_remaining: 0, next_due_at: r.nextDueAt, reason: null });
         }
         const { id: cardId, front, topic, deck_id: deckId } = r.card;
         return ok({
@@ -173,6 +179,7 @@ export function createVivaServer(userId: string): McpServer {
           card: { id: cardId, front, topic, deck_id: deckId },
           due_remaining: r.dueRemaining,
           next_due_at: r.nextDueAt,
+          reason: r.reason,
         });
       }),
   );
@@ -186,6 +193,7 @@ export function createVivaServer(userId: string): McpServer {
       inputSchema: {
         card_id: id.describe("The id from get_next_card."),
         answer: z.string().max(2000).describe("The user's answer, transcribed from speech."),
+        hints_used: z.number().int().min(0).max(3).optional().describe("How many hints (get_hint levels) the user heard before answering. Lowers the score of a correct answer."),
       },
       outputSchema: {
         spoken: z.string(),
@@ -195,9 +203,11 @@ export function createVivaServer(userId: string): McpServer {
         missing_points: z.array(z.string()),
         quality: z.number(),
         next_review_at: z.number(),
+        lapses: z.number().describe("How many times this card has been missed in total."),
+        suggest_explain: z.boolean().describe("True when the card keeps being missed; offer explain_again."),
       },
     },
-    ({ card_id, answer }) =>
+    ({ card_id, answer, hints_used }) =>
       safe(async () => {
         const card = await store.getCard(userId, card_id);
         if (!card) return fail("card_not_found", "I could not find that card. Call get_next_card to get a fresh one.");
@@ -207,12 +217,15 @@ export function createVivaServer(userId: string): McpServer {
           ? { verdict: "incorrect" as const, feedback: "No problem, this one will come back soon.", missing_points: [] }
           : await gradeAnswer(card, answer, userId);
 
-        const quality = verdictToQuality(grade.verdict, answer);
+        const quality = verdictToQuality(grade.verdict, answer, hints_used ?? 0);
         const updated = await store.recordReview(userId, card, grade.verdict, quality, answer);
         const showAnswer = grade.verdict !== "correct";
-        const spoken = showAnswer
-          ? speak(grade.feedback.split(/(?<=[.!?])\s/)[0], `The answer is: ${card.back}`)
-          : speak(grade.feedback);
+        const suggestExplain = grade.verdict === "incorrect" && updated.lapses >= 2;
+        const spoken = suggestExplain
+          ? speak(`The answer is: ${card.back}`, "This one keeps slipping. Say explain, and I will put it another way.")
+          : showAnswer
+            ? speak(grade.feedback.split(/(?<=[.!?])\s/)[0], `The answer is: ${card.back}`)
+            : speak(grade.feedback);
 
         return ok({
           spoken,
@@ -222,6 +235,8 @@ export function createVivaServer(userId: string): McpServer {
           missing_points: grade.missing_points,
           quality,
           next_review_at: updated.due_at,
+          lapses: updated.lapses,
+          suggest_explain: suggestExplain,
         });
       }),
   );
@@ -296,6 +311,174 @@ export function createVivaServer(userId: string): McpServer {
       safe(async () => {
         if (!(await store.deleteCard(userId, card_id))) return fail("card_not_found", "That card was already gone.");
         return ok({ spoken: "Deleted that card.", card_id });
+      }),
+  );
+
+  server.registerTool(
+    "get_hint",
+    {
+      title: "Get hint",
+      description:
+        "Give a hint for a card without revealing the answer. There are three levels, each more revealing: 1 points in the right direction, 2 gives a strong cue, 3 gives part of the answer. Hints are generated once per card and reused. Pass the number of hints heard to submit_answer as hints_used.",
+      inputSchema: {
+        card_id: id.describe("The id from get_next_card."),
+        level: z.number().int().min(1).max(3).optional().describe("Hint level, 1 to 3. Defaults to 1."),
+      },
+      outputSchema: {
+        spoken: z.string(),
+        card_id: z.string(),
+        level: z.number(),
+        hint: z.string(),
+        has_more: z.boolean(),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    ({ card_id, level }) =>
+      safe(async () => {
+        const card = await store.getCard(userId, card_id);
+        if (!card) return fail("card_not_found", "I could not find that card. Call get_next_card to get a fresh one.");
+        let hints = card.hints;
+        if (!hints) {
+          hints = await generateHints(card, userId);
+          await store.saveHints(userId, card.id, hints);
+        }
+        const n = level ?? 1;
+        const hint = hints[n - 1];
+        return ok({
+          spoken: speak(hint, n < 3 ? null : "Give it a try."),
+          card_id: card.id,
+          level: n,
+          hint,
+          has_more: n < 3,
+        });
+      }),
+  );
+
+  server.registerTool(
+    "explain_again",
+    {
+      title: "Explain again",
+      description:
+        "Re-explain a card the user keeps missing, from a different angle with an everyday example, and add an easier prerequisite card to the deck that comes up next. Generated once per card; calling again returns the same explanation.",
+      inputSchema: { card_id: id.describe("The card the user missed.") },
+      outputSchema: {
+        spoken: z.string(),
+        card_id: z.string(),
+        explanation: z.string(),
+        prerequisite_card: z.object({ id: z.string(), front: z.string() }).nullable(),
+      },
+    },
+    ({ card_id }) =>
+      safe(async () => {
+        const card = await store.getCard(userId, card_id);
+        if (!card) return fail("card_not_found", "I could not find that card. Call get_next_card to get a fresh one.");
+        if (card.explanation) {
+          const prereq = await store.prerequisiteOf(userId, card.id);
+          return ok({
+            spoken: speak(card.explanation),
+            card_id: card.id,
+            explanation: card.explanation,
+            prerequisite_card: prereq ? { id: prereq.id, front: prereq.front } : null,
+          });
+        }
+        const out = await explainAgain(card, await store.lastAnswer(userId, card.id), userId);
+        const prereq = await store.saveExplanation(userId, card, out.explanation, out.prerequisite);
+        return ok({
+          spoken: speak(out.explanation, "I added an easier card to build up to it."),
+          card_id: card.id,
+          explanation: out.explanation,
+          prerequisite_card: { id: prereq.id, front: prereq.front },
+        });
+      }),
+  );
+
+  server.registerTool(
+    "get_study_nudge",
+    {
+      title: "Get study nudge",
+      description:
+        "A short, proactive suggestion for what to study now, based on upcoming exam dates, cards due today, the streak, and weak topics. Good to speak when a study session opens.",
+      inputSchema: {
+        deck_id: id.optional().describe("Limit to one deck. Omit for all decks."),
+        timezone: z.string().max(64).optional().describe("IANA time zone for day boundaries. Defaults to UTC."),
+      },
+      outputSchema: {
+        spoken: z.string(),
+        nudge: z.string(),
+        exam: z.object({ deck_id: z.string(), deck_title: z.string(), date: z.string(), days_left: z.number() }).nullable(),
+        due_today: z.number(),
+        streak_days: z.number(),
+        focus_topic: z.string().nullable(),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    ({ deck_id, timezone }) =>
+      safe(async () => {
+        await store.ensureUser(userId);
+        const [decks, p] = await Promise.all([store.listDecks(userId), store.progress(userId, { deckId: deck_id, timeZone: timezone })]);
+        const scoped = deck_id ? decks.filter((d) => d.id === deck_id) : decks;
+        const exam = scoped
+          .map((d) => ({ d, days: store.daysUntil(d.exam_date) }))
+          .filter((x): x is { d: store.DeckSummary; days: number } => x.days != null && x.days >= 0)
+          .sort((a, b) => a.days - b.days)[0];
+        const focus = p.weak_topics[0]?.topic ?? null;
+        const due = p.due_today;
+
+        let nudge: string;
+        if (exam && exam.days === 0) {
+          nudge = speak(`Your ${exam.d.title} exam is today.`, focus ? `Let's do a quick run through ${focus}.` : "Let's do a quick warm-up.");
+        } else if (exam && exam.days <= store.EXAM_WINDOW_DAYS) {
+          nudge = speak(
+            `Your ${exam.d.title} exam is ${exam.days === 1 ? "tomorrow" : `in ${exam.days} days`}.`,
+            `You have ${plural(due, "card")} due.`,
+            focus ? `${focus} needs the most work, so I'll start there.` : null,
+          );
+        } else if (due === 0) {
+          nudge = "Nothing is due right now. You can study ahead, or add new notes.";
+        } else if (p.streak_days > 0) {
+          nudge = speak(`You're on a ${plural(p.streak_days, "day")} streak.`, `${plural(due, "card")} ${due === 1 ? "is" : "are"} due today. A few minutes keeps it going.`);
+        } else if (p.reviewed_7d === 0) {
+          nudge = speak(`You have ${plural(due, "card")} ready.`, "Answer out loud, in your own words.");
+        } else {
+          nudge = speak(`${plural(due, "card")} ${due === 1 ? "is" : "are"} due today.`, focus ? `Watch out for ${focus}.` : null);
+        }
+        return ok({
+          spoken: nudge,
+          nudge,
+          exam: exam ? { deck_id: exam.d.id, deck_title: exam.d.title, date: exam.d.exam_date!, days_left: exam.days } : null,
+          due_today: due,
+          streak_days: p.streak_days,
+          focus_topic: focus,
+        });
+      }),
+  );
+
+  server.registerTool(
+    "read_notes_photo",
+    {
+      title: "Read notes photo",
+      description:
+        "Transcribe a photo of handwritten or printed notes into plain text, ready for add_material. Send the image as a data URL (JPEG, PNG or WebP, under 3 MB). Uses one AI call.",
+      inputSchema: {
+        image: z
+          .string()
+          .max(4_200_000, "That photo is too large. Send one under 3 MB.")
+          .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/, "Send the photo as a JPEG, PNG or WebP data URL."),
+      },
+      outputSchema: { spoken: z.string(), text: z.string(), characters: z.number() },
+    },
+    ({ image }) =>
+      safe(async () => {
+        const out = await readNotesPhoto(image, userId);
+        if (!out.legible || out.text.trim().length < 20) {
+          return fail("not_legible", "I couldn't read notes in that photo. Try again with the page flat, well lit, and filling the frame.");
+        }
+        const text = out.text.trim();
+        return ok({
+          spoken: `I read about ${Math.max(1, Math.round(text.split(/\s+/).length / 10) * 10)} words from your notes. Check them, then make cards.`,
+          text,
+          characters: text.length,
+        });
       }),
   );
 
