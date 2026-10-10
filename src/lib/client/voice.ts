@@ -1,21 +1,74 @@
 "use client";
 
-// ---------- speech synthesis ----------
+// ---------- speech output ----------
+//
+// Viva speaks with a natural cloud voice (Google Cloud TTS via /api/tts) played through Web Audio, so the
+// reading line can follow the audio clock exactly. If that is unavailable, it uses the browser's own voice.
 
-let chosenVoice: SpeechSynthesisVoice | null | undefined;
+type CloudSpeech = { audio: string; wordTimes: number[] | null };
 
-function pickVoice(): SpeechSynthesisVoice | null {
-  if (chosenVoice !== undefined && chosenVoice !== null) return chosenVoice;
-  const voices = window.speechSynthesis?.getVoices() ?? [];
-  if (!voices.length) return null;
-  const en = voices.filter((v) => v.lang.toLowerCase().startsWith("en"));
-  chosenVoice =
-    en.find((v) => v.lang === "en-US" && v.localService) ??
-    en.find((v) => v.lang === "en-US") ??
-    en.find((v) => v.localService) ??
-    en[0] ??
-    null;
-  return chosenVoice;
+let audioCtx: AudioContext | null = null;
+let cloudOff = false; // set when the server has no voice configured, so we stop asking
+let cloudFailures = 0;
+const speechCache = new Map<string, Promise<CloudSpeech | null>>();
+
+function ctx(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  if (!audioCtx) {
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return null;
+    audioCtx = new Ctx();
+  }
+  return audioCtx;
+}
+
+/** Call inside a tap: mobile browsers only allow audio after a user gesture has started it. */
+export function unlockAudio(): void {
+  const c = ctx();
+  if (c) {
+    void c.resume();
+    const src = c.createBufferSource();
+    src.buffer = c.createBuffer(1, 1, 22050);
+    src.connect(c.destination);
+    src.start(0);
+  }
+  if (canSpeak()) {
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    window.speechSynthesis.speak(u);
+  }
+}
+
+/** Release audio output while the mic is listening; some phones route the mic badly with output active. */
+export function suspendAudio(): void {
+  if (audioCtx?.state === "running") void audioCtx.suspend();
+}
+
+function fetchCloud(text: string): Promise<CloudSpeech | null> {
+  if (cloudOff || !ctx()) return Promise.resolve(null);
+  let p = speechCache.get(text);
+  if (!p) {
+    p = fetch(`/api/tts?text=${encodeURIComponent(text)}`)
+      .then(async (res) => {
+        if (res.status === 501 || res.status === 403) cloudOff = true;
+        if (!res.ok) throw new Error(String(res.status));
+        cloudFailures = 0;
+        return (await res.json()) as CloudSpeech;
+      })
+      .catch(() => {
+        speechCache.delete(text);
+        if (++cloudFailures >= 3) cloudOff = true;
+        return null;
+      });
+    speechCache.set(text, p);
+    if (speechCache.size > 60) speechCache.delete(speechCache.keys().next().value!);
+  }
+  return p;
+}
+
+/** Start fetching audio for text that is about to be spoken. */
+export function prefetchSpeech(text: string): void {
+  if (text) void fetchCloud(text);
 }
 
 export function canSpeak(): boolean {
@@ -24,12 +77,123 @@ export function canSpeak(): boolean {
 
 export type SpeakHandle = { cancel: () => void; done: Promise<void> };
 
-/**
- * Speak text. `onWord` gets the char index of each spoken word, from boundary events when the
- * voice supports them, otherwise from a time-based sweep.
- */
+/** Speak text. `onWord` gets the char index of each word as it is spoken. */
 export function speak(text: string, onWord?: (charIndex: number) => void): SpeakHandle {
-  if (!canSpeak() || !text) return { cancel() {}, done: Promise.resolve() };
+  let cancelled = false;
+  let inner: SpeakHandle | null = null;
+  const done = (async () => {
+    if (!text) return;
+    const cloud = await fetchCloud(text);
+    if (cancelled) return;
+    if (cloud) {
+      inner = await playCloud(text, cloud, onWord).catch(() => null);
+      if (cancelled) inner?.cancel();
+      if (inner) return inner.done;
+    }
+    if (cancelled) return;
+    inner = speakWithBrowser(text, onWord);
+    return inner.done;
+  })();
+  return {
+    cancel() {
+      cancelled = true;
+      inner?.cancel();
+      if (!inner && canSpeak()) window.speechSynthesis.cancel();
+    },
+    done,
+  };
+}
+
+function wordStarts(text: string): number[] {
+  return [...text.matchAll(/\S+/g)].map((m) => m.index ?? 0);
+}
+
+/** Estimated start time of each word when the voice gives no timings: by length, with pauses after punctuation. */
+function estimateTimes(text: string, duration: number): number[] {
+  const words = text.match(/\S+/g) ?? [];
+  const weights = words.map((w) => w.length + 2 + (/[,;:]$/.test(w) ? 3 : /[.!?]$/.test(w) ? 5 : 0));
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  const speaking = duration * 0.94; // trailing silence
+  let acc = 0;
+  return weights.map((w) => {
+    const t = (acc / total) * speaking;
+    acc += w;
+    return t;
+  });
+}
+
+async function playCloud(text: string, speech: CloudSpeech, onWord?: (i: number) => void): Promise<SpeakHandle> {
+  const c = ctx()!;
+  if (c.state === "suspended") await c.resume();
+  const bytes = Uint8Array.from(atob(speech.audio), (ch) => ch.charCodeAt(0));
+  const buffer = await c.decodeAudioData(bytes.buffer);
+  if (c.state !== "running") throw new Error("audio locked");
+
+  const starts = wordStarts(text);
+  const times = speech.wordTimes && speech.wordTimes.length === starts.length ? speech.wordTimes : estimateTimes(text, buffer.duration);
+
+  const src = c.createBufferSource();
+  src.buffer = buffer;
+  src.connect(c.destination);
+  const startAt = c.currentTime + 0.05;
+  src.start(startAt);
+
+  let raf = 0;
+  let last = -1;
+  const tick = () => {
+    const t = c.currentTime - startAt;
+    if (t >= 0) {
+      let i = last < 0 ? 0 : last;
+      while (i + 1 < times.length && times[i + 1] <= t) i++;
+      if (i !== last) {
+        last = i;
+        onWord?.(starts[i]);
+      }
+    }
+    raf = requestAnimationFrame(tick);
+  };
+  if (onWord) raf = requestAnimationFrame(tick);
+
+  let resolveDone!: () => void;
+  const done = new Promise<void>((r) => (resolveDone = r));
+  src.onended = () => {
+    cancelAnimationFrame(raf);
+    resolveDone();
+  };
+  return {
+    cancel() {
+      cancelAnimationFrame(raf);
+      try {
+        src.stop();
+      } catch {}
+      resolveDone();
+    },
+    done,
+  };
+}
+
+// ---------- browser voice (fallback) ----------
+
+let chosenVoice: SpeechSynthesisVoice | null | undefined;
+
+function pickVoice(): SpeechSynthesisVoice | null {
+  if (chosenVoice) return chosenVoice;
+  const voices = window.speechSynthesis?.getVoices() ?? [];
+  if (!voices.length) return null;
+  const en = voices.filter((v) => v.lang.toLowerCase().startsWith("en"));
+  // Prefer the more natural-sounding voices when the platform offers them.
+  const natural = /natural|neural|enhanced|premium|siri|samantha|google us english/i;
+  chosenVoice =
+    en.find((v) => v.lang === "en-US" && natural.test(v.name)) ??
+    en.find((v) => v.lang === "en-US" && v.localService) ??
+    en.find((v) => v.lang === "en-US") ??
+    en[0] ??
+    null;
+  return chosenVoice;
+}
+
+function speakWithBrowser(text: string, onWord?: (charIndex: number) => void): SpeakHandle {
+  if (!canSpeak()) return { cancel() {}, done: Promise.resolve() };
   const synth = window.speechSynthesis;
   synth.cancel();
 
@@ -41,7 +205,7 @@ export function speak(text: string, onWord?: (charIndex: number) => void): Speak
 
   let sawBoundary = false;
   let sweep: number | undefined;
-  let fallbackTimer: number | undefined;
+  let sweepDelay: number | undefined;
   let finished = false;
   let resolveDone!: () => void;
   const done = new Promise<void>((r) => (resolveDone = r));
@@ -49,12 +213,14 @@ export function speak(text: string, onWord?: (charIndex: number) => void): Speak
   const finish = () => {
     if (finished) return;
     finished = true;
-    window.clearTimeout(fallbackTimer);
+    window.clearTimeout(sweepDelay);
     window.clearTimeout(sweep);
     window.clearTimeout(watchdog);
     resolveDone();
   };
 
+  // Without boundary events, follow an estimate. Only start once the engine reports it is speaking, and
+  // a little late rather than early: a highlight that runs ahead of the voice reads as broken.
   const startSweep = () => {
     const words = [...text.matchAll(/\S+/g)];
     let i = 0;
@@ -62,31 +228,18 @@ export function speak(text: string, onWord?: (charIndex: number) => void): Speak
       if (finished || sawBoundary || i >= words.length) return;
       const w = words[i++];
       onWord?.(w.index ?? 0);
-      // Roughly 165 words a minute, longer words take longer.
-      sweep = window.setTimeout(step, 200 + w[0].length * 45);
+      const pause = /[,;:]$/.test(w[0]) ? 180 : /[.!?]$/.test(w[0]) ? 320 : 0;
+      sweep = window.setTimeout(step, 230 + w[0].length * 55 + pause);
     };
     step();
   };
 
-  let started = false;
   u.onstart = () => {
-    if (!onWord || started) return;
-    started = true;
-    window.clearTimeout(fallbackTimer);
-    onWord(0);
-    fallbackTimer = window.setTimeout(() => {
+    if (!onWord) return;
+    sweepDelay = window.setTimeout(() => {
       if (!sawBoundary) startSweep();
-    }, 400);
+    }, 350);
   };
-  // If the engine never reports a start (no voices installed, some mobile browsers), sweep anyway.
-  if (onWord) {
-    fallbackTimer = window.setTimeout(() => {
-      if (!started && !sawBoundary) {
-        started = true;
-        startSweep();
-      }
-    }, 1200);
-  }
   u.onboundary = (e) => {
     if (e.name && e.name !== "word") return;
     sawBoundary = true;
@@ -97,7 +250,7 @@ export function speak(text: string, onWord?: (charIndex: number) => void): Speak
   u.onerror = finish;
 
   // Some mobile browsers never fire onend; never let the quiz hang on speech.
-  const watchdog = window.setTimeout(finish, 2500 + text.length * 90);
+  const watchdog = window.setTimeout(finish, 3000 + text.length * 90);
 
   synth.speak(u);
   return {
@@ -127,6 +280,9 @@ interface SpeechRecognitionLike extends EventTarget {
   stop(): void;
   abort(): void;
   onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null;
+  onsoundstart: (() => void) | null;
+  onspeechstart: (() => void) | null;
+  onspeechend: (() => void) | null;
   onerror: ((e: { error: string }) => void) | null;
   onend: (() => void) | null;
 }
@@ -143,7 +299,10 @@ export type ListenHandle = { stop: () => void; abort: () => void };
 
 export function listen(handlers: {
   onTranscript: (text: string) => void;
-  onEnd: (finalText: string) => void;
+  /** Rough loudness signal from recognition events, for devices where the level meter can't run. */
+  onActivity?: (level: number) => void;
+  /** `heard` is true when the browser detected speech, even if it produced no words. */
+  onEnd: (finalText: string, heard: boolean) => void;
   onError: (err: ListenError) => void;
 }): ListenHandle | null {
   const Ctor = recognitionCtor();
@@ -156,7 +315,15 @@ export function listen(handlers: {
 
   let text = "";
   let errored = false;
+  let heard = false;
+  rec.onsoundstart = () => handlers.onActivity?.(0.35);
+  rec.onspeechstart = () => {
+    heard = true;
+    handlers.onActivity?.(0.6);
+  };
+  rec.onspeechend = () => handlers.onActivity?.(0.15);
   rec.onresult = (e) => {
+    handlers.onActivity?.(0.8);
     // Rebuild from every result each time; Chrome on Android repeats earlier results otherwise.
     let t = "";
     for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
@@ -172,13 +339,24 @@ export function listen(handlers: {
     );
   };
   rec.onend = () => {
-    if (!errored) handlers.onEnd(text);
+    if (!errored) handlers.onEnd(text, heard);
   };
   rec.start();
   return { stop: () => rec.stop(), abort: () => rec.abort() };
 }
 
 // ---------- input level ----------
+
+/**
+ * Phones generally can't share the microphone between getUserMedia and speech recognition: with the
+ * level meter running, recognition hears silence. So the meter only runs on desktop.
+ */
+export function canMeterWhileListening(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const uaData = (navigator as unknown as { userAgentData?: { mobile?: boolean } }).userAgentData;
+  if (uaData?.mobile) return false;
+  return !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
 
 export type LevelMeter = { stop: () => void };
 

@@ -2,11 +2,24 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { LineSkeleton, MarkingLine, QuestionSkeleton } from "./Loading";
 import { Mark } from "./Mark";
 import { Mic } from "./Mic";
 import { ReadingLine } from "./ReadingLine";
 import { callTool, ToolError, type Deck, type ListDecks, type NextCard, type SubmitAnswer } from "@/lib/client/mcp";
-import { canSpeak, listen, matchCommand, recognitionCtor, speak, startLevelMeter, type ListenHandle, type LevelMeter, type SpeakHandle } from "@/lib/client/voice";
+import {
+  canMeterWhileListening,
+  listen,
+  matchCommand,
+  recognitionCtor,
+  speak,
+  startLevelMeter,
+  suspendAudio,
+  unlockAudio,
+  type LevelMeter,
+  type ListenHandle,
+  type SpeakHandle,
+} from "@/lib/client/voice";
 
 type Phase = "start" | "loading" | "asking" | "ready" | "listening" | "grading" | "feedback" | "caught-up" | "ended";
 
@@ -84,7 +97,7 @@ export function Quiz({ initialDeck }: { initialDeck?: string }) {
     async (c: NonNullable<NextCard["card"]>) => {
       const id = ++run.current;
       setPhase("asking");
-      setCharIndex(0);
+      setCharIndex(-1);
       await say(c.front, (i) => run.current === id && setCharIndex(i));
       if (run.current !== id) return;
       setCharIndex(-1);
@@ -186,6 +199,7 @@ export function Quiz({ initialDeck }: { initialDeck?: string }) {
   const startListening = useCallback(async () => {
     const id = ++run.current;
     speech.current?.cancel();
+    suspendAudio();
     setCharIndex(-1);
     setTranscript("");
     setNotice(null);
@@ -193,25 +207,39 @@ export function Quiz({ initialDeck }: { initialDeck?: string }) {
     const backTo: Phase = cardRef.current ? "ready" : "caught-up";
     setPhase("listening");
 
-    if (!meterOff.current) meter.current = await startLevelMeter(setLevel);
+    // On phones the meter would starve recognition of audio, so the mic breathes with recognition events instead.
+    const useMeter = !meterOff.current && canMeterWhileListening();
+    if (useMeter) meter.current = await startLevelMeter(setLevel);
     if (run.current !== id) return meter.current?.stop();
+    const decay = useMeter ? undefined : window.setInterval(() => setLevel((l) => (l < 0.05 ? 0 : l * 0.85)), 90);
+    const stopDecay = () => {
+      window.clearInterval(decay);
+      setLevel(0);
+    };
 
     const begin = (retried: boolean) => {
       rec.current = listen({
         onTranscript: (t) => run.current === id && setTranscript(t),
-        onEnd: (t) => {
+        onActivity: useMeter ? undefined : (l) => run.current === id && setLevel((v) => Math.max(v, l)),
+        onEnd: (t, heard) => {
+          stopDecay();
           meter.current?.stop();
           meter.current = null;
           rec.current = null;
           if (run.current !== id) return;
           if (!t) {
-            setNotice("I didn't hear anything. Tap the mic and answer again.");
+            setNotice(
+              heard
+                ? "I heard you but couldn't make out the words. Tap the mic and try again, a little closer to the phone."
+                : "I didn't hear anything. Tap the mic and answer again.",
+            );
             setPhase(backTo);
             return;
           }
           handleUtterance(t);
         },
         onError: (err) => {
+          stopDecay();
           meter.current?.stop();
           meter.current = null;
           rec.current = null;
@@ -242,12 +270,8 @@ export function Quiz({ initialDeck }: { initialDeck?: string }) {
   }, [phase, handleUtterance]);
 
   const start = () => {
-    // Speaking inside the tap unlocks audio on mobile browsers before the network round trip.
-    if (canSpeak()) {
-      const u = new SpeechSynthesisUtterance(" ");
-      u.volume = 0;
-      window.speechSynthesis.speak(u);
-    }
+    // Starting audio inside the tap unlocks it on mobile browsers before the network round trip.
+    unlockAudio();
     exclude.current = [];
     setAnswered(0);
     void nextQuestion();
@@ -276,9 +300,9 @@ export function Quiz({ initialDeck }: { initialDeck?: string }) {
       : phase === "listening"
         ? "Tap to stop"
         : phase === "grading"
-          ? "Checking..."
+          ? "Marking"
           : phase === "loading"
-            ? "Loading..."
+            ? "One moment"
             : "Tap to answer";
 
   const deckTitle = decks?.find((d) => d.id === deckId)?.title;
@@ -322,9 +346,11 @@ export function Quiz({ initialDeck }: { initialDeck?: string }) {
               I&apos;ll ask a question out loud. Tap the mic and answer in your own words.
             </p>
             <p className="intro-meta">
-              {decks == null
-                ? "Loading your decks..."
-                : `${deckTitle ?? "All decks"}: ${deckId ? (decks.find((d) => d.id === deckId)?.due_count ?? 0) : totalDue} cards due.`}
+              {decks == null ? (
+                <LineSkeleton label="Loading your decks" width="13em" />
+              ) : (
+                `${deckTitle ?? "All decks"}: ${deckId ? (decks.find((d) => d.id === deckId)?.due_count ?? 0) : totalDue} cards due.`
+              )}
             </p>
           </div>
         )}
@@ -340,7 +366,9 @@ export function Quiz({ initialDeck }: { initialDeck?: string }) {
           </div>
         )}
 
-        {card && inSession && phase !== "caught-up" && (
+        {phase === "loading" && <QuestionSkeleton label={answered ? "Finding your next question" : "Finding a question"} />}
+
+        {card && inSession && phase !== "caught-up" && phase !== "loading" && (
           <>
             <p className="quiz-count">
               {answered} answered · {dueRemaining} due
@@ -350,6 +378,7 @@ export function Quiz({ initialDeck }: { initialDeck?: string }) {
               {result && <Mark key={card.id} verdict={result.verdict} />}
             </div>
             {transcript && <p className="transcript">{transcript}</p>}
+            {phase === "grading" && <MarkingLine />}
             {result && (
               <div className="feedback">
                 <p>{result.feedback}</p>
@@ -363,8 +392,6 @@ export function Quiz({ initialDeck }: { initialDeck?: string }) {
             )}
           </>
         )}
-
-        {phase === "loading" && !card && <p className="intro-meta">Loading...</p>}
 
         {notice && <p className="notice">{notice}</p>}
 
