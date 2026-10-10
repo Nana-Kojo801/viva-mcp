@@ -2,7 +2,10 @@ import type { Row } from "@libsql/client";
 import type { CardDraft } from "./ai";
 import { db, newId } from "./db";
 import { SEED_CARDS, SEED_DECK_TITLE } from "./seed";
+import { daysUntil } from "./dates";
 import { DAY_MS, review, type Verdict } from "./sm2";
+
+export { daysUntil };
 
 export type Card = {
   id: string;
@@ -229,15 +232,6 @@ export function examUrgency(examDate: string | null, now = Date.now()): number {
   const days = daysUntil(examDate, now);
   if (days == null || days < 0 || days > EXAM_WINDOW_DAYS) return 0;
   return 1 - days / (EXAM_WINDOW_DAYS + 1);
-}
-
-/** Whole days from today (UTC) until an ISO date. Null when there is no date. */
-export function daysUntil(isoDate: string | null, now = Date.now()): number | null {
-  if (!isoDate) return null;
-  const target = Date.parse(`${isoDate}T00:00:00Z`);
-  if (Number.isNaN(target)) return null;
-  const today = Date.parse(`${new Date(now).toISOString().slice(0, 10)}T00:00:00Z`);
-  return Math.round((target - today) / DAY_MS);
 }
 
 export async function saveHints(userId: string, cardId: string, hints: string[]): Promise<void> {

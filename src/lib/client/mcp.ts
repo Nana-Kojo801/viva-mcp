@@ -64,6 +64,7 @@ export type NextCard = {
   card: { id: string; front: string; topic: string; deck_id: string } | null;
   due_remaining: number;
   next_due_at: number | null;
+  reason: "prerequisite" | "exam_focus" | "due" | "ahead" | null;
 };
 export type Verdict = "correct" | "partial" | "incorrect";
 export type SubmitAnswer = {
@@ -74,7 +75,20 @@ export type SubmitAnswer = {
   missing_points: string[];
   quality: number;
   next_review_at: number;
+  lapses: number;
+  suggest_explain: boolean;
 };
+export type Hint = { spoken: string; card_id: string; level: number; hint: string; has_more: boolean };
+export type Explain = { spoken: string; card_id: string; explanation: string; prerequisite_card: { id: string; front: string } | null };
+export type Nudge = {
+  spoken: string;
+  nudge: string;
+  exam: { deck_id: string; deck_title: string; date: string; days_left: number } | null;
+  due_today: number;
+  streak_days: number;
+  focus_topic: string | null;
+};
+export type NotesPhoto = { spoken: string; text: string; characters: number };
 export type AddMaterial = {
   spoken: string;
   deck_id: string;

@@ -396,11 +396,14 @@ export async function startLevelMeter(onLevel: (level: number) => void): Promise
 
 // ---------- voice commands ----------
 
-export type Command = "skip" | "repeat" | "dont-know" | "stop" | "study-ahead" | null;
+export type Command = "skip" | "repeat" | "dont-know" | "stop" | "study-ahead" | "hint" | "explain" | "next" | null;
 
 export function matchCommand(transcript: string): Command {
   const t = transcript.toLowerCase().replace(/[^a-z' ]/g, " ").replace(/\s+/g, " ").trim();
-  if (/^(skip|skip (it|this|this one|that)|next( question| one)?|pass)$/.test(t)) return "skip";
+  if (/^(skip|skip (it|this|this one|that)|pass)$/.test(t)) return "skip";
+  if (/^(next|next (question|one|card)|continue|go on|move on|okay next|ok next)$/.test(t)) return "next";
+  if (/^((give me |can i (have|get) )?(a |another )?(hint|clue)( please)?|help( me)?|i need a hint)$/.test(t)) return "hint";
+  if (/^(explain|explain (it|that|this)( again| differently| another way)?|explain again|(say|put) it (differently|another way)|i don'?t (get|understand) (it|that))$/.test(t)) return "explain";
   if (/^(repeat|repeat (it|that|the question)|say (it|that) again|again|what was the question)$/.test(t)) return "repeat";
   if (/^(i )?(don'?t|do not) know$|^no idea$|^i give up$/.test(t)) return "dont-know";
   if (/^(stop|stop (the )?quiz|end( quiz)?|quit|i'?m done|that'?s enough)$/.test(t)) return "stop";

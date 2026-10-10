@@ -12,6 +12,13 @@ describe("matchCommand", () => {
     ["Stop", "stop"],
     ["that's enough", "stop"],
     ["study ahead", "study-ahead"],
+    ["Give me a hint", "hint"],
+    ["another hint please", "hint"],
+    ["clue", "hint"],
+    ["Explain it differently", "explain"],
+    ["I don't get it", "explain"],
+    ["next question", "next"],
+    ["continue", "next"],
   ])("%s -> %s", (input, expected) => {
     expect(matchCommand(input)).toBe(expected);
   });
