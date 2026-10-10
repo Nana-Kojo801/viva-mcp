@@ -283,5 +283,21 @@ export function createVivaServer(userId: string): McpServer {
       }),
   );
 
+  server.registerTool(
+    "delete_card",
+    {
+      title: "Delete card",
+      description: "Permanently delete one card, for example a badly generated one.",
+      inputSchema: { card_id: id.describe("The card to delete.") },
+      outputSchema: { spoken: z.string(), card_id: z.string() },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    },
+    ({ card_id }) =>
+      safe(async () => {
+        if (!(await store.deleteCard(userId, card_id))) return fail("card_not_found", "That card was already gone.");
+        return ok({ spoken: "Deleted that card.", card_id });
+      }),
+  );
+
   return server;
 }
