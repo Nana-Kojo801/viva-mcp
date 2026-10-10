@@ -37,12 +37,22 @@ const NETWORK = "Can't reach Viva. Check your connection and try again.";
 // Last result of read-only tools, so screens can draw instantly and refresh in the background.
 const CACHED = new Set(["list_decks", "get_study_nudge", "get_progress"]);
 const WRITES = new Set(["add_material", "submit_answer", "set_exam_date", "delete_card", "explain_again"]);
-const cache = new Map<string, unknown>();
+const cache = new Map<string, { name: string; args: Record<string, unknown>; value: unknown }>();
 const key = (name: string, args: Record<string, unknown>) => `${name}:${JSON.stringify(args)}`;
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+// After a write, keep showing the last results (every screen refetches on open anyway) and quietly
+// refresh them, so the next tab opens on real data instead of a loading state.
+function refreshCacheSoon() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    for (const { name, args } of cache.values()) void callTool(name, args).catch(() => {});
+  }, 700);
+}
 
 /** The last result of a read-only tool call with these exact arguments, if any. */
 export function peekTool<T>(name: string, args: Record<string, unknown> = {}): T | undefined {
-  return cache.get(key(name, args)) as T | undefined;
+  return cache.get(key(name, args))?.value as T | undefined;
 }
 
 /** Warm the connection and the cache for a screen before the user opens it. */
@@ -69,8 +79,8 @@ export async function callTool<T extends { spoken: string }>(name: string, args:
     const code = String((result._meta as Record<string, unknown> | undefined)?.["viva/error"] ?? "error");
     throw new ToolError(text, code);
   }
-  if (CACHED.has(name)) cache.set(key(name, args), result.structuredContent);
-  else if (WRITES.has(name)) cache.clear(); // writes may change decks, due counts or progress
+  if (CACHED.has(name)) cache.set(key(name, args), { name, args, value: result.structuredContent });
+  else if (WRITES.has(name)) refreshCacheSoon(); // writes may change decks, due counts or progress
   return result.structuredContent as T;
 }
 

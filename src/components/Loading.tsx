@@ -59,14 +59,18 @@ export function WritingCards() {
   );
 }
 
-/** Progress, loading: the ledger ruled out with no marks yet. */
+/** Progress, loading: the stats card and the week's cards laid out with nothing written on them yet. */
 export function LedgerSkeleton() {
   return (
     <div role="status">
       <span className="visually-hidden">Loading progress</span>
-      <div className="summary-skeleton" aria-hidden="true">
-        <span style={{ width: "85%" }} />
-        <span style={{ width: "55%" }} />
+      <div className="stats paper stats-skeleton" aria-hidden="true">
+        {[0, 1, 2].map((i) => (
+          <span key={i} className="stat">
+            <span className="skeleton-num" />
+            <span className="skeleton-label" />
+          </span>
+        ))}
       </div>
       <ul className="ledger ledger-skeleton" aria-hidden="true">
         {[0, 1, 2, 3, 4, 5, 6].map((i) => (

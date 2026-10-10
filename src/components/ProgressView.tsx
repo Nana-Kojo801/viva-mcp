@@ -14,6 +14,9 @@ export function ProgressView() {
   const [decks, setDecks] = useState<Deck[]>(() => peekTool<ListDecks>("list_decks")?.decks ?? []);
   const [deckId, setDeckId] = useState("");
   const [p, setP] = useState<Progress | null>(null);
+  // With cached data the page slide is the whole entrance; sections only fade in when they replace a skeleton.
+  const [instant] = useState(() => !!peekTool<Progress>("get_progress", { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
+  const rise = instant ? "" : " rise";
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,7 +45,7 @@ export function ProgressView() {
 
   return (
     <div className="page">
-      <header className="page-head rise">
+      <header className="page-head">
         <h1 className="page-title">this week.</h1>
         {decks.length > 1 && (
           <label className="field inline">
@@ -68,7 +71,7 @@ export function ProgressView() {
 
       {p && (
         <>
-          <section className="stats paper rise" aria-label="Summary">
+          <section className={`stats paper${rise}`} aria-label="Summary">
             <p className="stat">
               <span className="stat-num stat-pen">
                 <CountUp value={p.streak_days} />
@@ -90,7 +93,7 @@ export function ProgressView() {
           </section>
 
           {exams.length > 0 && (
-            <ul className="exam-list rise" style={{ ["--d" as string]: "60ms" }}>
+            <ul className={`exam-list${rise}`} style={{ ["--d" as string]: "60ms" }}>
               {exams.map(({ d, label }) => (
                 <li key={d.id}>
                   <CalendarIcon className="chip-icon" />
@@ -102,7 +105,7 @@ export function ProgressView() {
             </ul>
           )}
 
-          <section className="rise" style={{ ["--d" as string]: "100ms" }} aria-labelledby="week-title">
+          <section className={rise.trim()} style={{ ["--d" as string]: "100ms" }} aria-labelledby="week-title">
             <h2 id="week-title" className="section-title">
               day by day
             </h2>
@@ -144,7 +147,7 @@ export function ProgressView() {
             )}
           </section>
 
-          <section className="rise" style={{ ["--d" as string]: "160ms" }} aria-labelledby="weak-title">
+          <section className={rise.trim()} style={{ ["--d" as string]: "160ms" }} aria-labelledby="weak-title">
             <h2 id="weak-title" className="section-title">
               weakest topics
             </h2>
@@ -165,7 +168,7 @@ export function ProgressView() {
           </section>
 
           {p.due_today > 0 && (
-            <p className="rise" style={{ ["--d" as string]: "200ms" }}>
+            <p className={rise.trim()} style={{ ["--d" as string]: "200ms" }}>
               <Link className="button button-wide" href={deckId ? `/?deck=${deckId}` : "/"} transitionTypes={["nav-back"]}>
                 review {p.due_today} {p.due_today === 1 ? "card" : "cards"}
                 <ArrowIcon className="button-icon" />
