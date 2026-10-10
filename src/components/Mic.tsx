@@ -1,32 +1,38 @@
 "use client";
 
+import { MicIcon } from "./Icons";
+
 type Props = {
   listening: boolean;
   busy: boolean;
+  /** Before a session starts: a soft halo invites the first tap. */
+  inviting?: boolean;
   level: number;
   label: string;
   onPress: () => void;
 };
 
-/** The primary action: a large circle that breathes with input level while listening. */
-export function Mic({ listening, busy, level, label, onPress }: Props) {
+/** The primary action: a large circle that swells with your voice while listening. */
+export function Mic({ listening, busy, inviting, level, label, onPress }: Props) {
+  const l = Math.min(level, 1);
   return (
     <div className="mic-wrap">
-      <button
-        type="button"
-        className={`mic${listening ? " is-listening" : ""}${listening && level === 0 ? " is-idle-breath" : ""}`}
-        style={listening ? { transform: `scale(${1 + Math.min(level, 1) * 0.18})` } : undefined}
-        onClick={onPress}
-        disabled={busy}
-        aria-label={label}
-        aria-pressed={listening}
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true" className="mic-glyph">
-          <rect x="9" y="3" width="6" height="11" rx="3" />
-          <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" fill="none" />
-        </svg>
-      </button>
-      <span className="mic-label" aria-hidden="true">
+      <div className={`mic-stage${listening ? " is-listening" : ""}${inviting ? " is-inviting" : ""}${busy ? " is-busy" : ""}`} style={{ ["--level" as string]: l }}>
+        <span className="mic-ring" aria-hidden="true" />
+        <span className="mic-ring mic-ring-2" aria-hidden="true" />
+        <button
+          type="button"
+          className={`mic${listening ? " is-listening" : ""}${listening && level === 0 ? " is-idle-breath" : ""}`}
+          style={listening ? { transform: `scale(${1 + l * 0.14})` } : undefined}
+          onClick={onPress}
+          disabled={busy}
+          aria-label={label}
+          aria-pressed={listening}
+        >
+          <MicIcon className="mic-glyph" />
+        </button>
+      </div>
+      <span className="mic-label" aria-hidden="true" key={label}>
         {label}
       </span>
     </div>

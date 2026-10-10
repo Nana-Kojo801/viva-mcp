@@ -17,13 +17,13 @@ export function QuestionSkeleton({ label }: { label: string }) {
 }
 
 /** Quiz, grading: the examiner's pencil underlining the answer while it is being marked. */
-export function MarkingLine() {
+export function MarkingLine({ label = "Marking your answer" }: { label?: string }) {
   return (
     <div className="marking" role="status">
       <svg viewBox="0 0 240 14" preserveAspectRatio="none" aria-hidden="true" className="marking-stroke">
         <path pathLength={1} d="M2 8 C 30 3, 52 12, 80 7 S 132 3, 160 8 S 210 12, 238 6" />
       </svg>
-      <p className="loading-caption">Marking your answer</p>
+      <p className="loading-caption">{label}</p>
     </div>
   );
 }

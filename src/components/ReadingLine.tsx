@@ -8,7 +8,7 @@ type Props = {
   charIndex: number;
 };
 
-/** The question, with a highlighter bar that follows the spoken word. */
+/** The question, with a highlighter bar that follows the spoken word. Words settle in one by one when it appears. */
 export function ReadingLine({ text, charIndex }: Props) {
   const words = useMemo(() => [...text.matchAll(/\S+/g)].map((m) => ({ word: m[0], start: m.index ?? 0 })), [text]);
   const active = charIndex < 0 ? -1 : words.findLastIndex((w) => w.start <= charIndex);
@@ -22,16 +22,18 @@ export function ReadingLine({ text, charIndex }: Props) {
 
   return (
     <p className="question">
-      {bar && (
-        <span
-          aria-hidden="true"
-          className="reading-bar"
-          style={{ transform: `translate(${bar.x - 4}px, ${bar.y + 2}px)`, width: bar.w + 8, height: bar.h - 2 }}
-        />
-      )}
+      <span
+        aria-hidden="true"
+        className={`reading-bar${bar ? " is-on" : ""}`}
+        style={bar ? { transform: `translate(${bar.x - 4}px, ${bar.y + 2}px)`, width: bar.w + 8, height: bar.h - 2 } : undefined}
+      />
       {words.map((w, i) => (
         <span key={i}>
-          <span ref={(el) => void (refs.current[i] = el)} className={i === active ? "word is-reading" : "word"}>
+          <span
+            ref={(el) => void (refs.current[i] = el)}
+            className={i === active ? "word is-reading" : "word"}
+            style={{ ["--i" as string]: i }}
+          >
             {w.word}
           </span>
           {i < words.length - 1 ? " " : ""}
