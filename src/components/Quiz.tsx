@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CountUp, MiniMark, Tally } from "./Bits";
-import { CalendarIcon, ExplainIcon, HintIcon, KeyboardIcon, NextIcon, RepeatIcon, ShrugIcon, SkipIcon, StopIcon } from "./Icons";
+import { CalendarIcon, KeyboardIcon, StopIcon } from "./Icons";
 import { LineSkeleton, MarkingLine, QuestionSkeleton } from "./Loading";
 import { Mark } from "./Mark";
 import { Mic } from "./Mic";
@@ -477,20 +477,34 @@ export function Quiz() {
   const exam = examLabel(selected ? selected.exam_date : (nudge?.exam?.date ?? null));
   const missed = result && result.verdict !== "correct";
 
+  const cardNo = session.length + (answered ? 0 : 1);
+  const headLeft = showCard && card ? card.topic : selected?.title ?? "all decks";
+  const headRight = showCard ? `card ${cardNo} · ${dueRemaining} due` : decks == null ? "" : `${selected ? selected.due_count : totalDue} due`;
+  const footLine =
+    phase === "start"
+      ? "tap record to start"
+      : phase === "ended"
+        ? "tap record to go again"
+      : phase === "asking"
+        ? "viva is reading · tap record to answer"
+        : phase === "listening"
+          ? "listening…"
+          : phase === "ready"
+            ? "your turn · tap record to answer"
+            : answered
+              ? "say next or explain"
+              : null;
+
   return (
     <div className="quiz">
       <header className="quiz-head">
-        <span className="wordmark">
-          Viva
-          <svg className="wordmark-swash" viewBox="0 0 80 10" preserveAspectRatio="none" aria-hidden="true">
-            <path pathLength={1} d="M2 6 C 20 2, 40 9, 78 4" />
-          </svg>
-        </span>
+        <span className="wordmark">viva.</span>
         <div className="quiz-head-right">
-          {exam && (
-            <span className="chip chip-exam">
-              <CalendarIcon className="chip-icon" />
-              {exam}
+          {inSession && session.length > 0 && (
+            <span className="session-marks" aria-label={`${session.length} answered this session`}>
+              {session.slice(-6).map((m, i) => (
+                <MiniMark key={session.length - Math.min(6, session.length) + i} verdict={m.verdict} />
+              ))}
             </span>
           )}
           <label className="deck-picker">
@@ -522,136 +536,145 @@ export function Quiz() {
         </div>
       </header>
 
-      {inSession && (
-        <div className="session-strip" aria-label={`${session.length} answered, ${dueRemaining} due`}>
-          <span className="session-marks">
-            {session.slice(-10).map((m, i) => (
-              <MiniMark key={session.length - Math.min(10, session.length) + i} verdict={m.verdict} />
-            ))}
-          </span>
-          <span className="session-count">
-            {session.length} answered · {dueRemaining} due
-          </span>
-        </div>
-      )}
-
       <section className="quiz-stage" aria-live="polite">
-        {phase === "start" && (
-          <div className="intro">
-            <h1 className="intro-title">
-              Say it <span className="swash-word">out loud</span>.
-            </h1>
-            <p className="intro-nudge">{nudge ? nudge.nudge : <LineSkeleton label="Loading a suggestion" width="16em" />}</p>
-            <p className="intro-meta">
-              {decks == null ? (
-                <LineSkeleton label="Loading your decks" width="11em" />
-              ) : (
+        <div className={`stack${inSession && session.length ? " is-deep" : ""}`}>
+          <article className={`index-card${answered ? " is-answered" : ""}`} key={showCard && card ? card.id : phase === "ended" ? "ended" : phase === "start" ? "start" : "other"}>
+            <div className="card-head">
+              <span className="card-head-left">{headLeft}</span>
+              <span className="card-head-right">
+                {exam && (
+                  <span className="exam-tag">
+                    <CalendarIcon className="chip-icon" />
+                    {exam.toLowerCase()}
+                  </span>
+                )}
+                {headRight}
+              </span>
+            </div>
+            <div className="card-rule" aria-hidden="true" />
+
+            <div className="card-body">
+              {phase === "start" && (
+                <div className="intro">
+                  <h1 className="intro-title">
+                    say it <span className="swash-word">out loud</span>.
+                  </h1>
+                  <p className="intro-nudge">{nudge ? nudge.nudge : <LineSkeleton label="Loading a suggestion" width="16em" />}</p>
+                  <div className="say-chips" aria-label="Things you can say">
+                    <span className="say-label">you can say</span>
+                    {["hint", "repeat", "skip", "I don't know", "explain", "stop"].map((c, i) => (
+                      <span key={c} className="say-chip" style={{ ["--i" as string]: i }}>
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {phase === "ended" && <SessionSummary session={session} />}
+
+              {phase === "loading" && <QuestionSkeleton label={session.length ? "drawing your next card" : "drawing a card"} />}
+
+              {showCard && card && (
                 <>
-                  {selected?.title ?? "All decks"} · {selected ? selected.due_count : totalDue} due
+                  {(reason === "exam_focus" || reason === "prerequisite" || reason === "ahead") && (
+                    <p className="card-reason">
+                      {reason === "exam_focus" ? "weak spot before your exam" : reason === "prerequisite" ? "building block" : "studying ahead"}
+                    </p>
+                  )}
+                  <div className={`question-row${answered ? " is-answered" : ""}`}>
+                    <ReadingLine key={card.id} text={card.front} charIndex={phase === "asking" ? charIndex : -1} />
+                    {result && <Mark key={`${card.id}-mark`} verdict={result.verdict} />}
+                  </div>
+
+                  {hints.map((h, i) => (
+                    <div key={i} className="sticky" style={{ ["--tilt" as string]: i % 2 ? "-1.4deg" : "1.2deg" }}>
+                      <p className="sticky-label">hint {i + 1} of 3</p>
+                      <p className="sticky-text">{h}</p>
+                    </div>
+                  ))}
+                  {phase === "hinting" && <MarkingLine label="thinking of a hint" />}
+
+                  {transcript && (
+                    <div className="answer">
+                      <p className="answer-label">your answer</p>
+                      <p className="transcript">
+                        {transcript.split(/\s+/).map((w, i) => (
+                          <span key={i} className="t-word">
+                            {w}{" "}
+                          </span>
+                        ))}
+                      </p>
+                    </div>
+                  )}
+                  {phase === "grading" && <MarkingLine />}
+
+                  {result && (
+                    <div className="feedback">
+                      <p>{result.feedback}</p>
+                      {result.correct_answer && (
+                        <p className="feedback-answer">
+                          <span className="feedback-label">answer</span>
+                          {result.correct_answer}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {phase === "explaining" && <MarkingLine label="finding another way to explain it" />}
+                  {explain && (
+                    <div className="explain">
+                      <p className="explain-label">another way to see it</p>
+                      <p className="explain-text">{explain.explanation}</p>
+                      {explain.prerequisite_card && (
+                        <p className="explain-added">
+                          added an easier card first: <em>{explain.prerequisite_card.front}</em>
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {autoNext && (
+                    <div className="auto-next" key={autoNext.key}>
+                      <span className="auto-next-track">
+                        <span className="auto-next-bar" style={{ animationDuration: `${autoNext.ms}ms` }} />
+                      </span>
+                      <span className="auto-next-row">
+                        <span className="auto-next-label">next card coming up</span>
+                        <button type="button" className="text-button" onClick={clearAuto}>
+                          stay here
+                        </button>
+                      </span>
+                    </div>
+                  )}
                 </>
               )}
-            </p>
-            <div className="say-chips" aria-label="Things you can say">
-              <span className="say-label">You can say</span>
-              {["hint", "repeat", "skip", "I don't know", "explain", "stop"].map((c, i) => (
-                <span key={c} className="say-chip" style={{ ["--i" as string]: i }}>
-                  {c}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
 
-        {phase === "ended" && <SessionSummary session={session} />}
+              {phase === "caught-up" && (
+                <div className="caught-up">
+                  <p className="intro-nudge">{notice ?? "You're all caught up."}</p>
+                  <div className="row-actions">
+                    <button type="button" className="button" onClick={() => void nextQuestion(true)}>
+                      study ahead
+                    </button>
+                    <Link className="text-button" href="/notes" transitionTypes={["nav-forward"]}>
+                      add notes
+                    </Link>
+                  </div>
+                </div>
+              )}
 
-        {phase === "loading" && <QuestionSkeleton label={session.length ? "Finding your next question" : "Finding a question"} />}
-
-        {showCard && card && (
-          <>
-            <p className="card-meta">
-              <span>{card.topic}</span>
-              {reason === "exam_focus" && <span className="chip chip-quiet">Weak spot before your exam</span>}
-              {reason === "prerequisite" && <span className="chip chip-quiet">Building block</span>}
-              {reason === "ahead" && <span className="chip chip-quiet">Studying ahead</span>}
-            </p>
-            <div className={`question-row${answered ? " is-answered" : ""}`}>
-              <ReadingLine key={card.id} text={card.front} charIndex={phase === "asking" ? charIndex : -1} />
-              {result && <Mark key={`${card.id}-mark`} verdict={result.verdict} />}
+              <div ref={stageEnd} className="stage-end" aria-hidden="true" />
             </div>
 
-            {hints.map((h, i) => (
-              <p key={i} className="hint-note">
-                <span className="hint-label">Hint {i + 1} of 3</span>
-                {h}
-              </p>
-            ))}
-            {phase === "hinting" && <MarkingLine label="Thinking of a hint" />}
+            {footLine && <p className="card-foot">{footLine}</p>}
+          </article>
+        </div>
 
-            {transcript && (
-              <p className="transcript">
-                {transcript.split(/\s+/).map((w, i) => (
-                  <span key={i} className="t-word">
-                    {w}{" "}
-                  </span>
-                ))}
-              </p>
-            )}
-            {phase === "grading" && <MarkingLine />}
-
-            {result && (
-              <div className="feedback">
-                <p>{result.feedback}</p>
-                {result.correct_answer && (
-                  <p className="feedback-answer">
-                    <span className="feedback-label">Answer </span>
-                    {result.correct_answer}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {phase === "explaining" && <MarkingLine label="Finding another way to explain it" />}
-            {explain && (
-              <div className="explain">
-                <p className="explain-label">Another way to see it</p>
-                <p className="explain-text">{explain.explanation}</p>
-                {explain.prerequisite_card && (
-                  <p className="explain-added">
-                    Added an easier card first: <em>{explain.prerequisite_card.front}</em>
-                  </p>
-                )}
-              </div>
-            )}
-
-            {autoNext && (
-              <div className="auto-next" key={autoNext.key}>
-                <span className="auto-next-bar" style={{ animationDuration: `${autoNext.ms}ms` }} />
-                <span className="auto-next-label">Next question coming up</span>
-                <button type="button" className="text-button" onClick={clearAuto}>
-                  Stay here
-                </button>
-              </div>
-            )}
-          </>
-        )}
-
-        {notice && (
+        {notice && phase !== "caught-up" && (
           <p className="notice" key={notice}>
             {notice}
           </p>
-        )}
-
-        <div ref={stageEnd} className="stage-end" aria-hidden="true" />
-
-        {phase === "caught-up" && (
-          <div className="row-actions">
-            <button type="button" className="button button-chalk" onClick={() => void nextQuestion(true)}>
-              Study ahead
-            </button>
-            <Link className="text-button" href="/notes" transitionTypes={["nav-forward"]}>
-              Add notes
-            </Link>
-          </div>
         )}
       </section>
 
@@ -660,32 +683,16 @@ export function Quiz() {
           <div className="toolbar" role="toolbar" aria-label="Quiz actions">
             {!answered ? (
               <>
-                <ToolButton label={hints.length ? `Hint ${Math.min(hints.length + 1, 3)}` : "Hint"} onClick={() => void requestHint()} disabled={busy || hints.length >= 3}>
-                  <HintIcon />
-                </ToolButton>
-                <ToolButton label="Repeat" onClick={() => handleUtterance("repeat")} disabled={busy}>
-                  <RepeatIcon />
-                </ToolButton>
-                <ToolButton label="Skip" onClick={() => handleUtterance("skip")} disabled={busy}>
-                  <SkipIcon />
-                </ToolButton>
-                <ToolButton label="Don't know" onClick={() => handleUtterance("I don't know")} disabled={busy}>
-                  <ShrugIcon />
-                </ToolButton>
+                <ToolButton label={hints.length ? `hint ${Math.min(hints.length + 1, 3)}` : "hint"} onClick={() => void requestHint()} disabled={busy || hints.length >= 3} />
+                <ToolButton label="repeat" onClick={() => handleUtterance("repeat")} disabled={busy} />
+                <ToolButton label="skip" onClick={() => handleUtterance("skip")} disabled={busy} />
+                <ToolButton label="don't know" onClick={() => handleUtterance("I don't know")} disabled={busy} />
               </>
             ) : (
               <>
-                <ToolButton label="Repeat" onClick={() => handleUtterance("repeat")} disabled={busy}>
-                  <RepeatIcon />
-                </ToolButton>
-                {missed && (
-                  <ToolButton label="Explain" onClick={() => void requestExplain()} disabled={busy} highlight={result?.suggest_explain && !explain}>
-                    <ExplainIcon />
-                  </ToolButton>
-                )}
-                <ToolButton label="Next" onClick={() => void nextQuestion()} disabled={busy}>
-                  <NextIcon />
-                </ToolButton>
+                <ToolButton label="repeat" onClick={() => handleUtterance("repeat")} disabled={busy} />
+                {missed && <ToolButton label="explain" onClick={() => void requestExplain()} disabled={busy} highlight={result?.suggest_explain && !explain} />}
+                <ToolButton label="next card" onClick={() => void nextQuestion()} disabled={busy} primary />
               </>
             )}
           </div>
@@ -702,12 +709,12 @@ export function Quiz() {
               ref={textInput}
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
-              placeholder={answered ? "Type next or explain" : "Type your answer"}
+              placeholder={answered ? "type next or explain" : "type your answer"}
               autoComplete="off"
               disabled={busy}
             />
             <button type="submit" disabled={busy || !typed.trim()}>
-              Send
+              send
             </button>
           </form>
         )}
@@ -723,7 +730,7 @@ export function Quiz() {
               disabled={!voiceIn}
             >
               <KeyboardIcon />
-              <span>Type</span>
+              <span>type</span>
             </button>
           ) : (
             <span className="round-spacer" />
@@ -741,7 +748,7 @@ export function Quiz() {
           {inSession ? (
             <button type="button" className="round-tool" onClick={end} aria-label="End session">
               <StopIcon />
-              <span>End</span>
+              <span>end</span>
             </button>
           ) : (
             <span className="round-spacer" />
@@ -757,18 +764,17 @@ function ToolButton({
   onClick,
   disabled,
   highlight,
-  children,
+  primary,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
   highlight?: boolean;
-  children: React.ReactNode;
+  primary?: boolean;
 }) {
   return (
-    <button type="button" className={`tool${highlight ? " is-suggested" : ""}`} onClick={onClick} disabled={disabled}>
-      <span className="tool-icon">{children}</span>
-      <span className="tool-label">{label}</span>
+    <button type="button" className={`tool${highlight ? " is-suggested" : ""}${primary ? " is-primary" : ""}`} onClick={onClick} disabled={disabled}>
+      {label}
     </button>
   );
 }
@@ -780,18 +786,18 @@ function SessionSummary({ session }: { session: SessionMark[] }) {
   const pct = session.length ? Math.round((right / session.length) * 100) : 0;
   return (
     <div className="summary-panel">
-      <h1 className="intro-title">{!session.length ? "See you soon." : pct >= 80 ? "Strong session." : pct >= 50 ? "Good work." : "Every miss counts."}</h1>
+      <h1 className="intro-title">{!session.length ? "see you soon." : pct >= 80 ? "strong session." : pct >= 50 ? "good work." : "every miss counts."}</h1>
       {session.length > 0 ? (
         <>
           <div className="summary-stats">
             <p>
-              <span className="stat-num">
+              <span className="stat-num stat-correct">
                 <CountUp value={right} />
               </span>
               <span className="stat-label">right</span>
             </p>
             <p>
-              <span className="stat-num">
+              <span className="stat-num stat-partial">
                 <CountUp value={partly} />
               </span>
               <span className="stat-label">partly</span>
@@ -803,7 +809,7 @@ function SessionSummary({ session }: { session: SessionMark[] }) {
               <span className="stat-label">answered</span>
             </p>
           </div>
-          {right > 0 && <Tally count={right} delay={300} className="tally-chalk" />}
+          {right > 0 && <Tally count={right} delay={300} />}
           {toRevisit.length > 0 && (
             <p className="intro-nudge">
               Worth another look: {toRevisit.join(", ")}. {session.some((m) => m.verdict === "incorrect") ? "Missed cards come back in about ten minutes." : ""}
@@ -815,7 +821,7 @@ function SessionSummary({ session }: { session: SessionMark[] }) {
       )}
       <p className="intro-meta">
         <Link href="/progress" transitionTypes={["nav-forward"]}>
-          See your progress
+          see your progress
         </Link>
       </p>
     </div>

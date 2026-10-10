@@ -5,14 +5,14 @@ import { MicIcon } from "./Icons";
 type Props = {
   listening: boolean;
   busy: boolean;
-  /** Before a session starts: a soft halo invites the first tap. */
+  /** Before a session starts: a soft pulse invites the first tap. */
   inviting?: boolean;
   level: number;
   label: string;
   onPress: () => void;
 };
 
-/** The primary action: a large circle that swells with your voice while listening. */
+/** The record button: red, with rings that ripple out with your voice while listening. */
 export function Mic({ listening, busy, inviting, level, label, onPress }: Props) {
   const l = Math.min(level, 1);
   return (
@@ -22,18 +22,18 @@ export function Mic({ listening, busy, inviting, level, label, onPress }: Props)
         <span className="mic-ring mic-ring-2" aria-hidden="true" />
         <button
           type="button"
-          className={`mic${listening ? " is-listening" : ""}${listening && level === 0 ? " is-idle-breath" : ""}`}
-          style={listening ? { transform: `scale(${1 + l * 0.14})` } : undefined}
+          className={`mic${listening ? " is-listening" : ""}`}
+          style={listening ? { transform: `scale(${1 + l * 0.12})` } : undefined}
           onClick={onPress}
           disabled={busy}
           aria-label={label}
           aria-pressed={listening}
         >
-          <MicIcon className="mic-glyph" />
+          {listening ? <span className="mic-rec" aria-hidden="true" /> : <MicIcon className="mic-glyph" />}
         </button>
       </div>
       <span className="mic-label" aria-hidden="true" key={label}>
-        {label}
+        {label.toLowerCase()}
       </span>
     </div>
   );
