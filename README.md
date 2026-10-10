@@ -86,8 +86,10 @@ The server is **stateless**: each POST gets a fresh server and transport and no 
 
 The quiz screen plays the part of an Alexa+ device:
 
-1. **Start quiz** (one tap) calls `get_next_card` through the MCP client and reads the question aloud with `speechSynthesis`. A highlighter bar follows the spoken word, driven by `SpeechSynthesisUtterance` boundary events, or by a timed sweep when the voice doesn't report boundaries.
-2. Tap the mic to answer. `SpeechRecognition` (or `webkitSpeechRecognition`) shows the live transcript, and the mic circle swells with the input level from a Web Audio analyser. Recognition stops on silence or when you tap again.
+1. **Start quiz** (one tap) calls `get_next_card` through the MCP client and reads the question aloud. A highlighter bar follows the spoken word.
+   - **Voice:** with `GOOGLE_TTS_API_KEY` set, speech comes from Google Cloud Text-to-Speech (a Chirp 3 HD voice) through `/api/tts`, and is played with Web Audio. The highlighter is timed against the audio clock: it uses exact word timings for voices that report them and estimates them from the audio length for the others. Identical sentences are cached by the CDN.
+   - **Fallback:** without the key, or when the daily voice budget is spent, the browser's `speechSynthesis` speaks instead, driven by boundary events or a conservative timed sweep. `/api/tts` is only the simulated device's speaker; all study logic goes through MCP.
+2. Tap the mic to answer. `SpeechRecognition` (or `webkitSpeechRecognition`) shows the live transcript. Recognition stops on silence or when you tap again. On desktop, the mic circle swells with the input level from a Web Audio analyser. On phones, it breathes with recognition events instead, because phones can't share the microphone between `getUserMedia` and speech recognition.
 3. The transcript is first checked for voice commands: **skip**, **repeat**, **I don't know**, **stop**, and **study ahead**. Anything else is sent to `submit_answer`.
 4. The examiner's mark (tick, partial circle, or cross) is drawn once. The `spoken` feedback is read aloud, and the next question follows automatically.
 
@@ -137,6 +139,9 @@ For local development without Turso, set `TURSO_DATABASE_URL=file:viva.db` to us
 | `MCP_API_KEY` | no | When set, external MCP clients must send `Authorization: Bearer <key>`. The Viva web app's same-origin browser requests are allowed without it. |
 | `AI_DAILY_CALL_CAP` | no | Global AI calls per day (UTC). The default is 300. |
 | `AI_SESSION_DAILY_CAP` | no | AI calls per user per day. The default is 40. |
+| `GOOGLE_TTS_API_KEY` | no | Google Cloud API key with the Text-to-Speech API enabled. It gives the natural voice; without it, the browser voice is used. |
+| `GOOGLE_TTS_VOICE` | no | The voice name. The default is `en-US-Chirp3-HD-Kore`. Non-Chirp voices (for example `en-US-Neural2-F`) report exact word timings. |
+| `TTS_DAILY_CHAR_CAP` | no | Characters of speech per day across all visitors. The default is 30,000, about 900k a month, which stays inside the free tier. |
 
 ### Create the Turso database
 
@@ -147,6 +152,12 @@ turso db create viva
 turso db show viva --url
 turso db tokens create viva
 ```
+
+### Get a Google Cloud Text-to-Speech key (optional, for the natural voice)
+
+1. In the [Google Cloud console](https://console.cloud.google.com), create a project and enable **Cloud Text-to-Speech API**. A billing account is required, but the monthly free tier covers this demo.
+2. Go to **APIs & Services → Credentials → Create credentials → API key**. Under **API restrictions**, restrict the key to Cloud Text-to-Speech API.
+3. Add the key as `GOOGLE_TTS_API_KEY` in Vercel and redeploy.
 
 ### Deploy to Vercel
 

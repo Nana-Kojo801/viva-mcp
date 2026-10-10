@@ -85,6 +85,17 @@ These are hand-drawn SVG paths with slight wobble: a tick (correct), a loose ope
 
 An 88px chalk circle at the bottom center, inside the thumb zone. When it is listening, it turns highlighter and scales between 1.0 and 1.18 with the RMS level from a Web Audio `AnalyserNode`. It has a visible focus ring (3px chalk outline with offset). The label under it says what a tap will do: "Tap to answer", "Tap to stop", "Checking...".
 
+## Loading states
+
+Loading states are drawn from the same motifs as the rest of the app, not spinners:
+
+- Waiting for a question: three blank lines in the question face, with the highlighter sweeping along each line in turn, captioned "Finding a question".
+- Marking an answer: a chalk pencil stroke underlines the transcript, again and again, captioned "Marking your answer".
+- Making cards: a ruled page whose lines fill with pencil in turn, with plain steps ("Reading your notes", then "Writing questions you can answer aloud").
+- Progress: the ledger is ruled out empty before the tally arrives.
+
+All of these stop moving under `prefers-reduced-motion`.
+
 ## Motion budget
 
 Only the reading line and the mark move. There are no page transitions, scroll fades, or hover animations. Buttons change color instantly.
