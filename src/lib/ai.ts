@@ -109,12 +109,13 @@ async function structured<T>(opts: {
   jsonSchema: Record<string, unknown>;
   schema: z.ZodType<T>;
 }): Promise<T> {
+  const ai = client();
   let lastProblem = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     await spendAiCall(opts.userId);
     let raw: string | null | undefined;
     try {
-      const res = await client().chat.completions.create({
+      const res = await ai.chat.completions.create({
         model: process.env.OPENAI_MODEL || DEFAULT_MODEL,
         messages: [
           { role: "system", content: opts.system },
