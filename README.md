@@ -88,6 +88,18 @@ You can also use the MCP Inspector (`npx @modelcontextprotocol/inspector`). Choo
 
 The server is **stateless**: each POST gets a fresh server and transport and no session id is issued, which fits serverless functions. `GET` and `DELETE` return 405, as the spec allows for servers that offer no standalone SSE stream.
 
+## Adding notes
+
+The notes screen accepts pasted text, a photo, or a file. Files are turned into text **in the browser**, and only the text is sent to `add_material`, so large slide decks never hit request limits:
+
+| File | How it's read |
+|---|---|
+| PDF | `unpdf` (a serverless build of PDF.js), loaded only when a PDF is chosen. Scanned PDFs have no text layer, so photograph those pages instead. |
+| Word `.docx`, PowerPoint `.pptx`, Excel `.xlsx`, OpenDocument `.odt/.odp/.ods` | Unzipped with `fflate`; paragraphs are read from the XML. Slides come in order, each followed by its speaker notes. |
+| RTF, HTML, Markdown, plain text, CSV, subtitles, and any other text file | Read directly, with markup stripped. |
+| Images (JPEG, PNG, WebP) | Sent to `read_notes_photo` after the browser downscales them. |
+| Old binary `.doc/.ppt/.xls`, Apple iWork | Not supported. Viva says how to convert them (save as `.docx`, `.pptx` or PDF). |
+
 ## How the simulation works
 
 The quiz screen plays the part of an Alexa+ device:

@@ -5,9 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowIcon, CalendarIcon, CameraIcon, FileIcon, PasteIcon, TrashIcon } from "./Icons";
 import { LineSkeleton, WritingCards } from "./Loading";
 import { examLabel } from "@/lib/dates";
-import { callTool, ToolError, type AddMaterial, type Deck, type ListDecks, type NotesPhoto } from "@/lib/client/mcp";
+import { ACCEPT, extractText, ExtractError, IMAGE } from "@/lib/client/extract";
+import { callTool, peekTool, ToolError, type AddMaterial, type Deck, type ListDecks, type NotesPhoto } from "@/lib/client/mcp";
 
-const MAX_FILE_BYTES = 500_000;
+const NOTES_LIMIT = 24_000;
 type Source = "paste" | "photo" | "file";
 
 const SOURCES: { key: Source; label: string; Icon: (p: { className?: string }) => React.ReactElement }[] = [
@@ -27,7 +28,9 @@ export function Notes() {
   const [deck, setDeck] = useState<AddMaterial | null>(null);
   const [cards, setCards] = useState<AddMaterial["cards"]>([]);
   const [removing, setRemoving] = useState<Set<string>>(new Set());
-  const [decks, setDecks] = useState<Deck[] | null>(null);
+  const [decks, setDecks] = useState<Deck[] | null>(() => peekTool<ListDecks>("list_decks")?.decks ?? null);
+  const [readingFile, setReadingFile] = useState<string | null>(null);
+  const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
 
   const loadDecks = useCallback(() => {
     callTool<ListDecks>("list_decks").then(
@@ -46,10 +49,28 @@ export function Notes() {
 
   const onFile = async (file: File | undefined) => {
     if (!file) return;
-    if (!/\.(txt|md|markdown)$/i.test(file.name)) return setError("That file type isn't supported. Choose a .txt or .md file.");
-    if (file.size > MAX_FILE_BYTES) return setError("That file is too large. Choose one under 500 KB, or paste the part you need.");
-    if (!title) setTitle(file.name.replace(/\.(txt|md|markdown)$/i, "").replace(/[-_]+/g, " "));
-    applyText(await file.text(), `Loaded ${file.name}. Check it, then make cards.`);
+    setError(null);
+    if (IMAGE.test(file.name) || file.type.startsWith("image/")) {
+      // Pictures of notes go through the photo reader.
+      setSource("photo");
+      setPendingPhoto(file);
+      return;
+    }
+    setReadingFile(file.name);
+    try {
+      const r = await extractText(file);
+      const base = file.name.replace(/\.[a-z0-9]+$/i, "");
+      if (!title) setTitle(base.replace(/[-_]+/g, " "));
+      const size = `${r.text.length.toLocaleString("en-US")} characters`;
+      applyText(
+        r.text,
+        `Read ${r.note ? `${r.note} from ` : ""}${file.name} (${size}).${r.text.length > NOTES_LIMIT ? " Only the first 24,000 characters are used, so trim it to the part you need." : " Check it, then make cards."}`,
+      );
+    } catch (err) {
+      setError(err instanceof ExtractError ? err.message : "Reading that file failed. Try again, or paste the text.");
+    } finally {
+      setReadingFile(null);
+    }
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -99,7 +120,7 @@ export function Notes() {
     <div className="page">
       <header className="page-head rise">
         <h1 className="page-title">Add notes</h1>
-        <p className="page-lede">Paste them, snap a photo, or upload a file. Viva turns them into questions you answer out loud.</p>
+        <p className="page-lede">Paste them, snap a photo, or upload a PDF, Word file or slide deck. Viva turns them into questions you answer out loud.</p>
       </header>
 
       {busy && <WritingCards />}
@@ -166,12 +187,19 @@ export function Notes() {
                 placeholder="Paste your notes here."
               />
               <span className="field-hint">
-                <span className={text.length > 24_000 ? "over" : ""}>{text.length.toLocaleString("en-US")}</span> / 24,000 characters
+                <span className={text.length > NOTES_LIMIT ? "over" : ""}>{text.length.toLocaleString("en-US")}</span> / 24,000 characters
               </span>
             </label>
           )}
-          {source === "photo" && <PhotoImport onText={(t) => applyText(t, "Read from your photo. Fix anything I got wrong, then make cards.")} onError={setError} />}
-          {source === "file" && <FileDrop onFile={(f) => void onFile(f)} />}
+          {source === "photo" && (
+            <PhotoImport
+              pending={pendingPhoto}
+              onPendingTaken={() => setPendingPhoto(null)}
+              onText={(t) => applyText(t, "Read from your photo. Fix anything I got wrong, then make cards.")}
+              onError={setError}
+            />
+          )}
+          {source === "file" && <FileDrop reading={readingFile} onFile={(f) => void onFile(f)} />}
 
           {info && source === "paste" && <p className="info">{info}</p>}
 
@@ -219,10 +247,28 @@ async function photoToDataUrl(file: File): Promise<string> {
   throw new Error("too-large");
 }
 
-function PhotoImport({ onText, onError }: { onText: (t: string) => void; onError: (e: string | null) => void }) {
+function PhotoImport({
+  pending,
+  onPendingTaken,
+  onText,
+  onError,
+}: {
+  pending: File | null;
+  onPendingTaken: () => void;
+  onText: (t: string) => void;
+  onError: (e: string | null) => void;
+}) {
   const [preview, setPreview] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+
+  // An image dropped on the File tab is handed over here.
+  useEffect(() => {
+    if (!pending) return;
+    onPendingTaken();
+    void pick(pending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending]);
 
   const pick = async (file: File | undefined) => {
     if (!file) return;
@@ -231,7 +277,7 @@ function PhotoImport({ onText, onError }: { onText: (t: string) => void; onError
     try {
       url = await photoToDataUrl(file);
     } catch {
-      return onError("I couldn't open that image. Try a JPEG or PNG photo.");
+      return onError("I couldn't open that image. Try a JPEG or PNG photo (some phones save HEIC; change the camera format to Most compatible).");
     }
     setPreview(url);
     setReading(true);
@@ -277,7 +323,7 @@ function PhotoImport({ onText, onError }: { onText: (t: string) => void; onError
   );
 }
 
-function FileDrop({ onFile }: { onFile: (f: File | undefined) => void }) {
+function FileDrop({ reading, onFile }: { reading: string | null; onFile: (f: File | undefined) => void }) {
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   return (
@@ -294,20 +340,29 @@ function FileDrop({ onFile }: { onFile: (f: File | undefined) => void }) {
         onFile(e.dataTransfer.files[0]);
       }}
     >
-      <FileIcon className="dropzone-icon" />
-      <p className="dropzone-title">Drop a .txt or .md file</p>
-      <p className="muted small">Up to 500 KB.</p>
+      {reading ? (
+        <div className="file-reading" aria-hidden="true">
+          <FileIcon className="dropzone-icon" />
+          <span className="scan-line" />
+        </div>
+      ) : (
+        <FileIcon className="dropzone-icon" />
+      )}
+      <p className="dropzone-title" role={reading ? "status" : undefined}>
+        {reading ? `Reading ${reading}…` : "Upload your study files"}
+      </p>
+      <p className="muted small">PDF, Word, PowerPoint (with speaker notes), Excel, OpenDocument, RTF, web pages, text and Markdown. Photos work too.</p>
       <input
         ref={input}
         type="file"
-        accept=".txt,.md,.markdown,text/plain,text/markdown"
+        accept={`${ACCEPT},image/*`}
         className="visually-hidden"
         onChange={(e) => {
           onFile(e.target.files?.[0]);
           e.target.value = "";
         }}
       />
-      <button type="button" className="button button-ghost" onClick={() => input.current?.click()}>
+      <button type="button" className="button button-ghost" onClick={() => input.current?.click()} disabled={!!reading}>
         Choose file
       </button>
     </div>
