@@ -32,6 +32,7 @@ To talk to the MCP server directly, see [Connect an MCP client](#connect-an-mcp-
 | MCP over Streamable HTTP, spec version `2025-11-25` or later | `src/app/api/mcp/route.ts` serves `McpServer` with `WebStandardStreamableHTTPServerTransport` (stateless). `initialize` negotiates `2025-11-25`, and `npm run mcp:smoke` prints the negotiated version. |
 | MCP is imported and called at runtime, not only described | The server: `src/lib/mcp/server.ts` (11 tools). The client: `src/lib/client/mcp.ts`, where the web app's every study action goes through the official MCP `Client` over HTTP. |
 | Simulated Alexa+ experience | The Quiz screen: browser mic and speaker, voice commands, and spoken replies, all through the MCP endpoint. |
+| A real Alexa+ device could connect | Streamable HTTP plus `2025-11-25`, ready for Amazon's MCP Toolkit. See [Connecting to Alexa+](#connecting-to-alexa) for the add-on setup and what's still open. |
 | Open-source license | [MIT](LICENSE) |
 | Free to test, with no login | Anonymous per-browser user and a seeded demo deck; daily AI budget caps keep it free. |
 | Setup and run instructions | [Setup](#setup) and [Deploy to Vercel](#deploy-to-vercel) below. |
@@ -151,6 +152,71 @@ You can also use the MCP Inspector (`npx @modelcontextprotocol/inspector`). Choo
 The server is **stateless**: each POST gets a fresh server and transport, and no session id is issued, which fits serverless functions. `GET` and `DELETE` return 405, as the spec allows for servers that offer no standalone SSE stream.
 
 **Server instructions** returned by `initialize` describe the voice loop for an agent: call `get_next_card`, read `spoken` aloud, send the transcript to `submit_answer`, offer `get_hint` and `explain_again`, and open the session with `get_study_nudge`.
+
+## Connecting to Alexa+
+
+The web app is one client of the MCP server, standing in for a voice device. On a real Alexa+ device, **Alexa+ is the MCP client**. You talk to Alexa, not to the web app:
+
+1. "Alexa, quiz me on my biology notes." Alexa+ turns the speech into text, its AI picks Viva's `get_next_card` tool, and it reads back the `spoken` line in its own voice.
+2. You answer to Alexa. Alexa+ sends the transcript to `submit_answer` and speaks Viva's feedback.
+3. "Give me a hint", "explain that" and "how am I doing?" map to `get_hint`, `explain_again` and `get_progress`.
+
+You'd still use the web app to add notes (a voice device can't take a PDF) and to see the progress tally. Both read the same database.
+
+### Readiness
+
+| Alexa+ MCP Toolkit requirement | Viva today |
+|---|---|
+| Streamable HTTP (the legacy HTTP+SSE transport isn't accepted) | Yes. Stateless Streamable HTTP at `/api/mcp`. |
+| MCP spec `2025-11-25` | Yes. Negotiated on `initialize`. |
+| Reachable at a remote HTTPS URL | Yes. `https://viva-mcp.vercel.app/api/mcp` |
+| Responses designed for voice | Yes. Every tool returns a `spoken` line of at most three plain sentences, and the server's `instructions` describe the voice loop. |
+| Visuals | Not needed. Text-only add-ons are supported; MCP Apps is optional. |
+| Round trips under 500 ms | **Partly.** Reading tools (`get_next_card`, `get_progress`, `get_study_nudge`, stored hints) answer in about 75–160 ms on the live site. `submit_answer` takes 1–2 s because grading is an AI call, and `add_material` takes 10–30 s. Card-making belongs in the web app anyway. For grading, the next step is a faster model, or quick answers for clear-cut cases. |
+| Per-user sign-in (OAuth 2.1 account linking) | **Not yet.** The web app identifies users by an anonymous cookie id, sent as `x-viva-user`. Alexa+ won't send that header, so Alexa+ calls would use the shared `demo` account. See [Account linking plan](#account-linking-plan). |
+
+### Deploying it as an Alexa+ add-on
+
+Amazon's [MCP Toolkit](https://developer.amazon.com/docs/alexaplus/add-ons/mcp-toolkit-overview.html) wraps an existing MCP server in an "add-on". It's currently available in the United States, and Amazon is onboarding partners in stages. Following the [quickstart](https://developer.amazon.com/docs/alexaplus/add-ons/mcp-toolkit-quickstart.html):
+
+```bash
+alexa-ai configure                      # sign in with Login with Amazon
+alexa-ai new mcp --name "Viva" --locale en-US \
+  --mcp-server-url https://viva-mcp.vercel.app/api/mcp
+# fill in addon-package/addon.json: listing, example phrases, icons, privacy and terms URLs
+alexa-ai deploy                         # development stage; test in the simulator or on a device
+```
+
+The part of `addon.json` that points Alexa+ at Viva (an excerpt; the CLI scaffolds the full file):
+
+```json
+{
+  "integrations": [
+    {
+      "type": "MCP",
+      "config": {
+        "endpoints": {
+          "default": { "type": "HTTPS", "uri": "https://viva-mcp.vercel.app/api/mcp" }
+        }
+      }
+    }
+  ]
+}
+```
+
+Example phrases for the listing: "Quiz me on my notes", "Give me a hint", "How am I doing this week?", "When is my exam?"
+
+Alexa+ refreshes tool information only on deployment, so run `alexa-ai deploy` again after changing tools.
+
+### Account linking plan
+
+To make a student's Alexa+ device and their phone share one account, Viva would add what the toolkit expects for authenticated servers:
+
+1. **A Viva sign-in.** It stays optional, so the web app stays free to try with no login. Signing in adopts the anonymous cookie user, so existing decks carry over.
+2. **An OAuth 2.1 authorization server** using the authorization code flow with PKCE (`S256`), honoring the `resource` parameter. Its metadata is published at `/.well-known/oauth-authorization-server`, and the protected resource metadata at `/.well-known/oauth-protected-resource` (RFC 9728).
+3. **Per-user bearer tokens on `/api/mcp`.** The token maps to the same user id the web app uses, so `x-viva-user` stays only for the anonymous web demo. Requests without a token keep working as the demo user, and sign-in-only tools would return 401.
+
+The existing `MCP_API_KEY` is a single shared key that protects a private deployment. It doesn't identify users, so it's not a substitute.
 
 ## How the simulation works
 
