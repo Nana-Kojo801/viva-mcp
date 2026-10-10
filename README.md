@@ -1,42 +1,97 @@
 # Viva
 
-A voice-first study companion. Add your notes, and Viva turns them into flashcards. It then quizzes you out loud, grades your spoken answers, and schedules reviews with spaced repetition.
+**A voice-first study companion.** Add your notes, and Viva turns them into flashcards. It then quizzes you out loud, grades your spoken answers, and schedules reviews with spaced repetition.
 
-Viva was built for the **Alexa+ track** of the Build, Ship, Shape: Amazon Developer Hackathon 2026. It has two cooperating parts in one repo:
+**Live demo: [viva-mcp.vercel.app](https://viva-mcp.vercel.app)** · MCP endpoint: `https://viva-mcp.vercel.app/api/mcp` · [MIT license](LICENSE)
 
-1. **A real MCP server** at `/api/mcp`. It exposes study tools over MCP Streamable HTTP (protocol `2025-11-25`, stateless), so an Alexa+ device or any MCP client can connect to it.
-2. **A web app** with three screens: *Add notes*, *Quiz* (a simulated Alexa+ experience with mic and speaker in the browser), and *Progress*. The quiz uses the official MCP client to call **the same MCP server** over HTTP that an external agent would use. It has no private shortcut APIs.
+Built for the **Alexa+ track** of the Build, Ship, Shape: Amazon Developer Hackathon 2026. Viva is both **a real MCP server** that an Alexa+ device or any MCP client can connect to, and **a simulated Alexa+ experience** in the browser that calls that same server over MCP.
 
-Both parts share one Turso database.
+<table>
+  <tr>
+    <td><img src="docs/screenshots/1-start.jpg" width="200" alt="Start screen: Say it out loud, with a study suggestion and the voice commands"></td>
+    <td><img src="docs/screenshots/2-reading-line.jpg" width="200" alt="A question being read aloud, with the highlighter following the spoken word"></td>
+    <td><img src="docs/screenshots/3-graded.jpg" width="200" alt="A spoken answer graded correct, with a hand-drawn tick and feedback"></td>
+    <td><img src="docs/screenshots/5-progress.jpg" width="200" alt="Progress: streak, cards due, accuracy, and a tally of correct answers for the week"></td>
+  </tr>
+</table>
+
+## Try it in 30 seconds
+
+1. Open **[viva-mcp.vercel.app](https://viva-mcp.vercel.app)** on a phone or laptop. Chrome is best for voice. There's no sign-up: every visitor gets their own copy of a 12-card demo deck.
+2. Tap the mic (**Start quiz**). Viva reads a question aloud, with a highlighter following each word.
+3. Tap the mic again and answer in your own words. Try **hint**, **repeat**, **skip**, **I don't know**, **explain** or **stop**. If voice input isn't available, tap **Type**.
+4. Open **Notes** to make your own deck. Paste text, take a photo of handwritten notes, or upload a PDF, Word file or slide deck.
+5. Check **Progress** for your streak, a tally of the week, and your weakest topics.
+
+To talk to the MCP server directly, see [Connect an MCP client](#connect-an-mcp-client).
+
+## How Viva meets the Alexa+ track requirements
+
+| Requirement | Where |
+|---|---|
+| MCP over Streamable HTTP, spec version `2025-11-25` or later | `src/app/api/mcp/route.ts` serves `McpServer` with `WebStandardStreamableHTTPServerTransport` (stateless). `initialize` negotiates `2025-11-25`, and `npm run mcp:smoke` prints the negotiated version. |
+| MCP is imported and called at runtime, not only described | The server: `src/lib/mcp/server.ts` (11 tools). The client: `src/lib/client/mcp.ts`, where the web app's every study action goes through the official MCP `Client` over HTTP. |
+| Simulated Alexa+ experience | The Quiz screen: browser mic and speaker, voice commands, and spoken replies, all through the MCP endpoint. |
+| Open-source license | [MIT](LICENSE) |
+| Free to test, with no login | Anonymous per-browser user and a seeded demo deck; daily AI budget caps keep it free. |
+| Setup and run instructions | [Setup](#setup) and [Deploy to Vercel](#deploy-to-vercel) below. |
+| Product feedback and friction log | [docs/PRODUCT_FEEDBACK.md](docs/PRODUCT_FEEDBACK.md) and [docs/FRICTION_LOG.md](docs/FRICTION_LOG.md) |
 
 ## Architecture
 
+```mermaid
+flowchart LR
+  subgraph Browser["Browser (simulated Alexa+ device)"]
+    UI["Quiz · Notes · Progress<br/>Next.js + React"]
+    Voice["Mic: Web Speech recognition<br/>Speaker: Web Audio / speechSynthesis"]
+    Files["File and photo reader<br/>fflate · unpdf · canvas"]
+    MCPC["Official MCP client<br/>@modelcontextprotocol/sdk"]
+    UI --- Voice
+    UI --- Files
+    UI --> MCPC
+  end
+
+  Alexa["Alexa+ or any MCP client"]
+
+  subgraph Vercel["Next.js on Vercel"]
+    Route["POST /api/mcp<br/>Streamable HTTP, stateless"]
+    Server["McpServer: 11 tools<br/>zod input and output schemas"]
+    SM2["sm2.ts<br/>spaced repetition"]
+    AI["ai.ts<br/>OpenAI + zod + budget guards"]
+    TTS["/api/tts<br/>device speaker only"]
+    Route --> Server
+    Server --> SM2
+    Server --> AI
+  end
+
+  MCPC -- "JSON-RPC over HTTP" --> Route
+  Alexa -- "JSON-RPC over HTTP" --> Route
+  Voice -. "natural voice" .-> TTS
+  Server --> DB[("Turso<br/>libSQL")]
+  AI --> OpenAI(["OpenAI API"])
+  TTS --> Google(["Google Cloud TTS"])
 ```
-                 ┌──────────────────────── browser ────────────────────────┐
-                 │  Add notes        Quiz (simulated Alexa+)     Progress  │
-                 │      │        mic: Web Speech recognition         │     │
-                 │      │        speaker: speechSynthesis            │     │
-                 │      └──────────────┬─────────────────────────────┘     │
-                 │      MCP client (@modelcontextprotocol/sdk)             │
-                 └─────────────────────┼───────────────────────────────────┘
-                                       │  JSON-RPC over Streamable HTTP
-  Alexa+ / any MCP client ────────────►│  POST /api/mcp   (x-viva-user header)
-                                       ▼
-                  ┌───────────── Next.js on Vercel ─────────────┐
-                  │  McpServer + WebStandardStreamableHTTP       │
-                  │  transport (stateless, one per request)      │
-                  │   tools: list_decks, add_material,           │
-                  │   get_next_card, submit_answer,              │
-                  │   get_progress, set_exam_date, delete_card,  │
-                  │   get_hint, explain_again, get_study_nudge,  │
-                  │   read_notes_photo                           │
-                  │      │                │                      │
-                  │  src/lib/ai.ts    src/lib/sm2.ts             │
-                  │  (OpenAI, zod,    (SM-2, plain code)         │
-                  │   budget guards)                             │
-                  └──────┬───────────────┬──────────────────────┘
-                         ▼               ▼
-                     OpenAI API     Turso (libSQL)
+
+One voice turn, as the simulation runs it:
+
+```mermaid
+sequenceDiagram
+  participant U as Student
+  participant B as Browser (simulated device)
+  participant M as /api/mcp
+  participant D as Turso
+  participant O as OpenAI
+  B->>M: tools/call get_next_card
+  M->>D: pick due card (prerequisites, then weak topics if an exam is near)
+  M-->>B: front + spoken
+  B->>U: reads the question, highlighter follows each word
+  U->>B: speaks an answer (live transcript)
+  B->>B: voice command? (hint, skip, repeat, explain, stop)
+  B->>M: tools/call submit_answer(card_id, transcript)
+  M->>O: grade (strict JSON, zod-validated)
+  M->>D: SM-2 update + review row
+  M-->>B: verdict, feedback, spoken
+  B->>U: draws the examiner's mark, speaks the feedback
 ```
 
 ## MCP tools
@@ -61,44 +116,41 @@ Tool errors (budget reached, unknown card, AI unavailable) come back as `isError
 
 **Users.** There is no sign-up. Each browser gets an anonymous id in the `viva_user` cookie, and the web app sends it as the `x-viva-user` header. MCP clients that omit the header act as the shared `demo` user. Every new user automatically gets their own copy of a 12-card demo deck ("Supply and demand basics"), so the quiz works with one tap.
 
-## Connecting an MCP client
+## Connect an MCP client
 
 ```bash
 # initialize (protocol 2025-11-25 is negotiated)
-curl -s -X POST https://YOUR-APP.vercel.app/api/mcp \
+curl -s -X POST https://viva-mcp.vercel.app/api/mcp \
   -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
 
 # list tools
-curl -s -X POST https://YOUR-APP.vercel.app/api/mcp \
+curl -s -X POST https://viva-mcp.vercel.app/api/mcp \
   -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
   -H 'mcp-protocol-version: 2025-11-25' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+
+# ask for the next card, as a specific user
+curl -s -X POST https://viva-mcp.vercel.app/api/mcp \
+  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+  -H 'mcp-protocol-version: 2025-11-25' -H 'x-viva-user: judge-1' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_next_card","arguments":{}}}'
 ```
 
-If `MCP_API_KEY` is set, add `-H 'authorization: Bearer <key>'`. Add `-H 'x-viva-user: <id>'` to act as a specific user.
+- If `MCP_API_KEY` is set on a deployment, add `-H 'authorization: Bearer <key>'`. It is not set on the public demo.
+- `x-viva-user` picks the user. Without it, calls act as the shared `demo` user.
 
-The repo includes a smoke test that runs the full voice loop with the official MCP client:
+The repo includes a smoke test that runs the voice loop with the official MCP client:
 
 ```bash
-npm run mcp:smoke -- https://YOUR-APP.vercel.app/api/mcp
+npm run mcp:smoke -- https://viva-mcp.vercel.app/api/mcp
 ```
 
 You can also use the MCP Inspector (`npx @modelcontextprotocol/inspector`). Choose the "Streamable HTTP" transport and the URL above.
 
-The server is **stateless**: each POST gets a fresh server and transport and no session id is issued, which fits serverless functions. `GET` and `DELETE` return 405, as the spec allows for servers that offer no standalone SSE stream.
+The server is **stateless**: each POST gets a fresh server and transport, and no session id is issued, which fits serverless functions. `GET` and `DELETE` return 405, as the spec allows for servers that offer no standalone SSE stream.
 
-## Adding notes
-
-The notes screen accepts pasted text, a photo, or a file. Files are turned into text **in the browser**, and only the text is sent to `add_material`, so large slide decks never hit request limits:
-
-| File | How it's read |
-|---|---|
-| PDF | `unpdf` (a serverless build of PDF.js), loaded only when a PDF is chosen. Scanned PDFs have no text layer, so photograph those pages instead. |
-| Word `.docx`, PowerPoint `.pptx`, Excel `.xlsx`, OpenDocument `.odt/.odp/.ods` | Unzipped with `fflate`; paragraphs are read from the XML. Slides come in order, each followed by its speaker notes. |
-| RTF, HTML, Markdown, plain text, CSV, subtitles, and any other text file | Read directly, with markup stripped. |
-| Images (JPEG, PNG, WebP) | Sent to `read_notes_photo` after the browser downscales them. |
-| Old binary `.doc/.ppt/.xls`, Apple iWork | Not supported. Viva says how to convert them (save as `.docx`, `.pptx` or PDF). |
+**Server instructions** returned by `initialize` describe the voice loop for an agent: call `get_next_card`, read `spoken` aloud, send the transcript to `submit_answer`, offer `get_hint` and `explain_again`, and open the session with `get_study_nudge`.
 
 ## How the simulation works
 
@@ -117,6 +169,18 @@ The quiz screen plays the part of an Alexa+ device:
 
 Fallbacks: if speech recognition isn't available (for example, some iPhone browsers), or the microphone is blocked, a text box appears, and questions are still read aloud. "No speech", network failures, and the daily demo limit each show a plain message that says what to do next.
 
+## Adding notes
+
+The notes screen accepts pasted text, a photo, or a file. Files are turned into text **in the browser**, and only the text is sent to `add_material`, so large slide decks never hit request limits:
+
+| File | How it's read |
+|---|---|
+| PDF | `unpdf` (a serverless build of PDF.js), loaded only when a PDF is chosen. Scanned PDFs have no text layer, so photograph those pages instead. |
+| Word `.docx`, PowerPoint `.pptx`, Excel `.xlsx`, OpenDocument `.odt/.odp/.ods` | Unzipped with `fflate`; paragraphs are read from the XML. Slides come in order, each followed by its speaker notes. |
+| RTF, HTML, Markdown, plain text, CSV, subtitles, and any other text file | Read directly, with markup stripped. |
+| Images (JPEG, PNG, WebP) | Sent to `read_notes_photo` after the browser downscales them. |
+| Old binary `.doc/.ppt/.xls`, Apple iWork | Not supported. Viva says how to convert them (save as `.docx`, `.pptx` or PDF). |
+
 ## Spaced repetition
 
 `src/lib/sm2.ts` implements SM-2 on quality 0–5 (correct = 5, or 4 if the transcript sounds hesitant; partial = 3; incorrect = 1):
@@ -133,7 +197,9 @@ All AI calls go through `src/lib/ai.ts` (OpenAI, default model `gpt-4.1-mini`, w
 
 - Notes are truncated to 24,000 characters and split into chunks of about 6,000 characters, one call per chunk. Each call produces 8 to 20 cards.
 - Before **every** AI call, the `usage` table is checked and incremented for a global daily cap (`AI_DAILY_CALL_CAP`) and a per-user daily cap (`AI_SESSION_DAILY_CAP`). When either cap is reached, tools return "Demo limit reached for today…" in both the UI and `spoken`.
-- Cards are generated once and never regenerated. Spoken answers are truncated to 1,000 characters.
+- Everything AI makes is generated once and stored: cards, the three hints for a card, and its re-explanation. None of it is regenerated. "I don't know" answers, study nudges, and progress use no AI at all.
+- Spoken answers are truncated to 1,000 characters, and photos are downscaled in the browser before upload.
+- Speech has its own budget: `TTS_DAILY_CHAR_CAP` characters a day, and the CDN caches repeated sentences.
 
 ## Setup
 
@@ -184,37 +250,61 @@ turso db tokens create viva
 ### Deploy to Vercel
 
 1. In Vercel, choose **Add New → Project** and import this GitHub repo. The framework preset is detected as Next.js, so the defaults need no changes.
-2. Under **Environment Variables**, add `OPENAI_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and optionally `AI_DAILY_CALL_CAP`, `AI_SESSION_DAILY_CAP`, and `MCP_API_KEY`.
+2. Under **Environment Variables**, add `OPENAI_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and optionally `GOOGLE_TTS_API_KEY`, `AI_DAILY_CALL_CAP`, `AI_SESSION_DAILY_CAP`, `TTS_DAILY_CHAR_CAP`, and `MCP_API_KEY`. After changing a variable, redeploy so the functions pick it up.
 3. Deploy. The tables are created on the first request to `/api/mcp`.
-4. Check it with `npm run mcp:smoke -- https://YOUR-APP.vercel.app/api/mcp`, or with the `curl` commands above.
+4. Check it with `npm run mcp:smoke -- https://YOUR-APP.vercel.app/api/mcp`, or with the `curl` commands in [Connect an MCP client](#connect-an-mcp-client).
 
 `/api/mcp` sets `maxDuration = 60`, so `add_material` has time for long notes on the Hobby plan.
 
-## Scripts
+## Testing
 
-| Command | What it does |
-|---|---|
-| `npm run dev` | Runs the dev server. |
-| `npm run build` / `npm start` | Production build and server. |
-| `npm test` | Unit tests (SM-2, budget, AI parsing, store, voice commands). |
-| `npm run lint` | Type check. |
-| `npm run db:setup` | Applies the schema to `TURSO_DATABASE_URL`. |
-| `npm run mcp:smoke -- <url>` | Runs the full tool loop with the official MCP client. |
+```bash
+npm test             # 41 unit tests: SM-2, budget caps, AI parsing and retry, store and card selection, voice commands
+npm run lint         # type check
+npm run build        # production build
+npm run mcp:smoke -- https://viva-mcp.vercel.app/api/mcp
+```
+
+Run this checklist on a phone (Chrome on Android) before each submission. The automated tests already cover the scheduling ("a wrong answer comes back sooner"), the budget caps, and command matching.
+
+- [ ] Paste notes, get cards, delete one.
+- [ ] Upload a PDF or slide deck, and a photo of handwritten notes.
+- [ ] Tap the mic, speak an answer, see the transcript, hear the feedback.
+- [ ] Ask for a hint; miss a card and say "explain".
+- [ ] Mic blocked: the typing fallback works.
+- [ ] AI cap reached on purpose (set `AI_SESSION_DAILY_CAP=2` and redeploy): a friendly "demo limit reached" message appears. Then set it back.
+- [ ] `initialize` and `tools/list` over `curl`: `2025-11-25` is negotiated.
+- [ ] Cold-load the live URL in a private tab: the seeded deck's quiz starts in one tap.
 
 ## Project layout
 
 ```
-src/app/api/mcp/route.ts   MCP endpoint (Streamable HTTP, stateless)
-src/lib/mcp/server.ts      Tool definitions
-src/lib/ai.ts              All AI calls: generateCards, gradeAnswer
-src/lib/budget.ts          Daily AI caps
-src/lib/sm2.ts             Spaced repetition
-src/lib/store.ts           Database queries
-src/lib/seed.ts            Demo deck
-src/lib/client/            Browser MCP client, voice helpers, anonymous user id
-src/components/            Quiz, Notes, Progress UI
-docs/                      Design plan, friction log, product feedback
+src/app/api/mcp/route.ts    MCP endpoint (Streamable HTTP, stateless, optional bearer auth)
+src/app/api/tts/route.ts    Simulated device speaker (Google Cloud TTS, cached, budgeted)
+src/lib/mcp/server.ts       The 11 MCP tools and server instructions
+src/lib/ai.ts               All AI calls: cards, grading, hints, re-explanations, photo transcription
+src/lib/budget.ts           Daily AI call and speech character caps
+src/lib/sm2.ts              Spaced repetition (SM-2)
+src/lib/store.ts            Database queries, card selection, progress
+src/lib/schema.ts, db.ts    Turso schema and migrations
+src/lib/seed.ts             Demo deck
+src/lib/tts.ts              Google Cloud TTS client
+src/lib/client/mcp.ts       Browser MCP client and screen cache
+src/lib/client/voice.ts     Speech in and out, the reading line timing, voice commands
+src/lib/client/extract.ts   PDF, Office, OpenDocument, RTF and HTML text extraction
+src/components/             Quiz, Notes, Progress, and the shared UI pieces
+tests/                      Vitest unit tests
+scripts/                    db:setup and the MCP smoke test
+docs/                       Design plan, demo script, friction log, product feedback, screenshots
 ```
+
+## Docs
+
+- [docs/DESIGN.md](docs/DESIGN.md): the design system, motion, and the review against the brief
+- [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md): the 2-minute demo video script
+- [docs/FRICTION_LOG.md](docs/FRICTION_LOG.md): what was confusing or broken, and suggestions
+- [docs/PRODUCT_FEEDBACK.md](docs/PRODUCT_FEEDBACK.md): the tools used, what worked, and what needs work
+- [docs/SUBMISSION.md](docs/SUBMISSION.md): the project description for the submission form
 
 ## License
 
