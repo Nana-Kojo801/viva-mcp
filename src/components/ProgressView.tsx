@@ -36,15 +36,17 @@ export function ProgressView() {
     .filter((d) => (deckId ? d.id === deckId : true))
     .map((d) => ({ d, label: examLabel(d.exam_date) }))
     .filter((x): x is { d: Deck; label: string } => !!x.label);
-  const maxDay = p ? Math.max(1, ...p.week.map((d) => d.correct + d.partial + d.incorrect)) : 1;
+
+  const todayKey = p?.week.at(-1)?.day;
+  const tilts = ["-1.5deg", "1deg", "-0.5deg", "1.8deg", "-1deg", "0.8deg", "-1.4deg"];
 
   return (
     <div className="page">
       <header className="page-head rise">
-        <h1 className="page-title">Progress</h1>
+        <h1 className="page-title">this week.</h1>
         {decks.length > 1 && (
           <label className="field inline">
-            <span>Deck</span>
+            <span>deck</span>
             <select value={deckId} onChange={(e) => setDeckId(e.target.value)}>
               <option value="">All decks</option>
               {decks.map((d) => (
@@ -66,21 +68,21 @@ export function ProgressView() {
 
       {p && (
         <>
-          <section className="stats rise" aria-label="Summary">
+          <section className="stats paper rise" aria-label="Summary">
             <p className="stat">
-              <span className="stat-num">
+              <span className="stat-num stat-pen">
                 <CountUp value={p.streak_days} />
               </span>
-              <span className="stat-label">{p.streak_days === 1 ? "day streak" : "day streak"}</span>
+              <span className="stat-label">day streak</span>
             </p>
             <p className="stat">
-              <span className="stat-num">
+              <span className="stat-num stat-wrong">
                 <CountUp value={p.due_today} />
               </span>
               <span className="stat-label">due today</span>
             </p>
             <p className="stat">
-              <span className="stat-num">
+              <span className="stat-num stat-correct">
                 {p.accuracy_7d == null ? "–" : <CountUp value={p.accuracy_7d * 100} format={(n) => `${Math.round(n)}%`} />}
               </span>
               <span className="stat-label">right this week</span>
@@ -93,54 +95,48 @@ export function ProgressView() {
                 <li key={d.id}>
                   <CalendarIcon className="chip-icon" />
                   <span>
-                    <strong>{label}</strong> · {d.title}
+                    <strong>{label.toLowerCase()}</strong> · {d.title}
                   </span>
                 </li>
               ))}
             </ul>
           )}
 
-          {p.due_today > 0 && (
-            <p className="rise" style={{ ["--d" as string]: "80ms" }}>
-              <Link className="button" href={deckId ? `/?deck=${deckId}` : "/"} transitionTypes={["nav-back"]}>
-                Review {p.due_today} {p.due_today === 1 ? "card" : "cards"}
-                <ArrowIcon className="button-icon" />
-              </Link>
-            </p>
-          )}
-
-          <section className="rise" style={{ ["--d" as string]: "120ms" }} aria-labelledby="week-title">
+          <section className="rise" style={{ ["--d" as string]: "100ms" }} aria-labelledby="week-title">
             <h2 id="week-title" className="section-title">
-              This week
+              day by day
             </h2>
-            <p className="muted small">One stroke for each correct answer. The line underneath shows everything you answered.</p>
             {p.reviewed_7d === 0 ? (
-              <div className="empty">
+              <div className="empty paper">
                 <p className="empty-title">Your tally starts with your first answer.</p>
                 <Link className="text-button" href="/" transitionTypes={["nav-back"]}>
-                  Start a quiz
+                  start a quiz
                 </Link>
               </div>
             ) : (
-              <ul className="ledger">
+              <ul className="day-cards" aria-label="Correct answers per day">
                 {p.week.map((d, i) => {
                   const total = d.correct + d.partial + d.incorrect;
+                  const isToday = d.day === todayKey;
                   return (
-                    <li key={d.day} className="ledger-row" style={{ ["--i" as string]: i }}>
-                      <span className="ledger-day">{weekday(d.day)}</span>
-                      <span className="ledger-marks">
-                        <Tally count={d.correct} delay={250 + i * 90} />
-                        <span className="ledger-volume" aria-hidden="true">
-                          <span className="vol-correct" style={{ width: `${(d.correct / maxDay) * 100}%` }} />
-                          <span className="vol-partial" style={{ width: `${(d.partial / maxDay) * 100}%` }} />
-                          <span className="vol-incorrect" style={{ width: `${(d.incorrect / maxDay) * 100}%` }} />
-                        </span>
-                      </span>
-                      <span className={`ledger-count${total === 0 ? " ledger-zero" : ""}`}>
-                        {total === 0 ? "–" : d.correct}
-                        <span className="visually-hidden"> correct</span>
-                        {total > d.correct && <span className="ledger-miss"> of {total}</span>}
-                      </span>
+                    <li
+                      key={d.day}
+                      className={`day-card${total === 0 ? " is-rest" : ""}${isToday ? " is-today" : ""}`}
+                      style={{ ["--tilt" as string]: tilts[i], ["--i" as string]: i }}
+                    >
+                      <span className="day-name">{isToday ? "today" : weekday(d.day).toLowerCase()}</span>
+                      {total === 0 ? (
+                        <span className="day-rest">rest</span>
+                      ) : (
+                        <>
+                          <Tally count={d.correct} delay={300 + i * 90} />
+                          <span className="day-count">
+                            {d.correct}
+                            <span className="visually-hidden"> correct</span>
+                            {total > d.correct && <span className="day-of"> of {total}</span>}
+                          </span>
+                        </>
+                      )}
                     </li>
                   );
                 })}
@@ -148,28 +144,34 @@ export function ProgressView() {
             )}
           </section>
 
-          <section className="rise" style={{ ["--d" as string]: "180ms" }} aria-labelledby="weak-title">
+          <section className="rise" style={{ ["--d" as string]: "160ms" }} aria-labelledby="weak-title">
             <h2 id="weak-title" className="section-title">
-              Weakest topics
+              weakest topics
             </h2>
             {p.weak_topics.length === 0 ? (
               <p className="muted">Nothing weak yet. Topics you miss will show up here.</p>
             ) : (
-              <ol className="weak-list">
+              <ol className="dividers">
                 {p.weak_topics.map((t, i) => (
                   <li key={t.topic} style={{ ["--i" as string]: i }}>
-                    <span className="weak-topic">{t.topic}</span>
-                    <span className="weak-meta">
+                    <span className="divider-title">{t.topic}</span>
+                    <span className={`divider-meta${t.miss_rate >= 0.4 ? " is-bad" : ""}`}>
                       {fmt(t.misses)} of {t.attempts} missed
-                    </span>
-                    <span className="weak-bar" aria-hidden="true">
-                      <span style={{ width: `${Math.round(t.miss_rate * 100)}%` }} />
                     </span>
                   </li>
                 ))}
               </ol>
             )}
           </section>
+
+          {p.due_today > 0 && (
+            <p className="rise" style={{ ["--d" as string]: "200ms" }}>
+              <Link className="button button-wide" href={deckId ? `/?deck=${deckId}` : "/"} transitionTypes={["nav-back"]}>
+                review {p.due_today} {p.due_today === 1 ? "card" : "cards"}
+                <ArrowIcon className="button-icon" />
+              </Link>
+            </p>
+          )}
         </>
       )}
     </div>

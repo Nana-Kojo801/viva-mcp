@@ -119,8 +119,8 @@ export function Notes() {
   return (
     <div className="page">
       <header className="page-head rise">
-        <h1 className="page-title">Add notes</h1>
-        <p className="page-lede">Paste them, snap a photo, or upload a PDF, Word file or slide deck. Viva turns them into questions you answer out loud.</p>
+        <h1 className="page-title">new deck.</h1>
+        <p className="page-lede">Paste them, snap a photo, or drop in a PDF, Word file or slide deck. Viva writes the cards; you keep the good ones.</p>
       </header>
 
       {busy && <WritingCards />}
@@ -154,11 +154,11 @@ export function Notes() {
           </ol>
           <div className="row-actions">
             <Link className="button" href={`/?deck=${deck.deck_id}`} transitionTypes={["nav-back"]}>
-              Start quiz
+              start quiz
               <ArrowIcon className="button-icon" />
             </Link>
             <button type="button" className="text-button" onClick={() => setDeck(null)}>
-              Add more notes
+              add more notes
             </button>
           </div>
         </section>
@@ -171,7 +171,7 @@ export function Notes() {
             {SOURCES.map(({ key, label, Icon }) => (
               <button key={key} type="button" role="tab" aria-selected={source === key} className="segmented-option" onClick={() => setSource(key)}>
                 <Icon className="segmented-icon" />
-                {label}
+                {label.toLowerCase()}
               </button>
             ))}
           </div>
@@ -205,11 +205,11 @@ export function Notes() {
 
           <div className="field-row">
             <label className="field">
-              <span>Title</span>
+              <span>title</span>
               <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Cell biology, chapter 3" maxLength={120} />
             </label>
             <label className="field">
-              <span>Exam date (optional)</span>
+              <span>exam date (optional)</span>
               <input type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} />
             </label>
           </div>
@@ -220,7 +220,7 @@ export function Notes() {
             </p>
           )}
           <button type="submit" className="button button-wide">
-            Make cards
+            make cards
           </button>
         </form>
       )}
@@ -317,7 +317,7 @@ function PhotoImport({
       />
       <button type="button" className="button" onClick={() => input.current?.click()} disabled={reading}>
         <CameraIcon className="button-icon" />
-        {preview ? "Take another" : "Take photo"}
+        {preview ? "take another" : "take photo"}
       </button>
     </div>
   );
@@ -363,7 +363,7 @@ function FileDrop({ reading, onFile }: { reading: string | null; onFile: (f: Fil
         }}
       />
       <button type="button" className="button button-ghost" onClick={() => input.current?.click()} disabled={!!reading}>
-        Choose file
+        choose file
       </button>
     </div>
   );
@@ -373,7 +373,7 @@ function DeckList({ decks, onChange }: { decks: Deck[] | null; onChange: () => v
   return (
     <section className="decks rise" style={{ ["--d" as string]: "120ms" }} aria-labelledby="decks-title">
       <h2 id="decks-title" className="section-title">
-        Your decks
+        your decks
       </h2>
       {decks == null ? (
         <LineSkeleton label="Loading your decks" width="14em" />
@@ -420,7 +420,7 @@ function DeckRow({ deck, index, onChange }: { deck: Deck; index: number; onChang
           {label && (
             <span className="chip chip-paper">
               <CalendarIcon className="chip-icon" />
-              {label}
+              {label.toLowerCase()}
             </span>
           )}
         </p>
@@ -429,12 +429,12 @@ function DeckRow({ deck, index, onChange }: { deck: Deck; index: number; onChang
             <span className="visually-hidden">Exam date for {deck.title}</span>
             <input type="date" defaultValue={deck.exam_date ?? ""} onChange={(e) => void save(e.target.value)} disabled={saving} autoFocus />
             <button type="button" className="text-button" onClick={() => setEditing(false)}>
-              Cancel
+              cancel
             </button>
           </label>
         ) : (
           <button type="button" className="text-button small-button" onClick={() => setEditing(true)}>
-            {deck.exam_date ? "Change exam date" : "Add exam date"}
+            {deck.exam_date ? "change exam date" : "add exam date"}
           </button>
         )}
         {error && <p className="error small">{error}</p>}

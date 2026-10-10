@@ -4,12 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { prefetchTools } from "@/lib/client/mcp";
-import { MicIcon, PageIcon, TallyIcon } from "./Icons";
 
 const LINKS = [
-  { href: "/", label: "Quiz", Icon: MicIcon },
-  { href: "/notes", label: "Notes", Icon: PageIcon },
-  { href: "/progress", label: "Progress", Icon: TallyIcon },
+  { href: "/", label: "quiz" },
+  { href: "/notes", label: "notes" },
+  { href: "/progress", label: "progress" },
 ];
 
 export function Nav() {
@@ -30,9 +29,8 @@ export function Nav() {
     return () => (window.cancelIdleCallback ?? window.clearTimeout)(id);
   }, []);
   return (
-    <nav className="nav" aria-label="Main" style={{ ["--active" as string]: active }}>
+    <nav className="nav" aria-label="Main">
       <div className="nav-track">
-        <span className="nav-indicator" aria-hidden="true" />
         {LINKS.map((l, i) => (
           <Link
             key={l.href}
@@ -41,8 +39,7 @@ export function Nav() {
             aria-current={i === active ? "page" : undefined}
             transitionTypes={i === active ? undefined : [i > active ? "nav-forward" : "nav-back"]}
           >
-            <l.Icon className="nav-icon" />
-            <span>{l.label}</span>
+            {l.label}
           </Link>
         ))}
       </div>
