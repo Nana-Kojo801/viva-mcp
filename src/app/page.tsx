@@ -1,11 +1,11 @@
 import { PageTransition } from "@/components/PageTransition";
 import { Quiz } from "@/components/Quiz";
 
-export default async function QuizPage({ searchParams }: { searchParams: Promise<{ deck?: string }> }) {
-  const { deck } = await searchParams;
+// Static, like the other screens, so it is prefetched and opens instantly. Quiz reads ?deck= in the browser.
+export default function QuizPage() {
   return (
     <PageTransition>
-      <Quiz initialDeck={typeof deck === "string" ? deck : undefined} />
+      <Quiz />
     </PageTransition>
   );
 }

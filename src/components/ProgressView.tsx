@@ -6,12 +6,12 @@ import { CountUp, Tally } from "./Bits";
 import { ArrowIcon, CalendarIcon } from "./Icons";
 import { LedgerSkeleton } from "./Loading";
 import { examLabel } from "@/lib/dates";
-import { callTool, ToolError, type Deck, type ListDecks, type Progress } from "@/lib/client/mcp";
+import { callTool, peekTool, ToolError, type Deck, type ListDecks, type Progress } from "@/lib/client/mcp";
 
 const weekday = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
 
 export function ProgressView() {
-  const [decks, setDecks] = useState<Deck[]>([]);
+  const [decks, setDecks] = useState<Deck[]>(() => peekTool<ListDecks>("list_decks")?.decks ?? []);
   const [deckId, setDeckId] = useState("");
   const [p, setP] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,9 +25,9 @@ export function ProgressView() {
 
   useEffect(() => {
     setError(null);
-    setP(null);
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    callTool<Progress>("get_progress", { timezone, ...(deckId ? { deck_id: deckId } : {}) })
+    const args = { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, ...(deckId ? { deck_id: deckId } : {}) };
+    setP(peekTool<Progress>("get_progress", args) ?? null);
+    callTool<Progress>("get_progress", args)
       .then(setP)
       .catch((e: unknown) => setError(e instanceof ToolError ? e.message : "Can't load progress. Reload the page."));
   }, [deckId]);

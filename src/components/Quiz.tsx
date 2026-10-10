@@ -11,6 +11,7 @@ import { ReadingLine } from "./ReadingLine";
 import { examLabel } from "@/lib/dates";
 import {
   callTool,
+  peekTool,
   ToolError,
   type Deck,
   type Explain,
@@ -56,10 +57,10 @@ const AUTO_NEXT_CORRECT = 1800;
 const AUTO_NEXT_MISSED = 5000;
 const timezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-export function Quiz({ initialDeck }: { initialDeck?: string }) {
+export function Quiz() {
   const [phase, setPhase] = useState<Phase>("start");
-  const [decks, setDecks] = useState<Deck[] | null>(null);
-  const [deckId, setDeckId] = useState<string>(initialDeck ?? ALL);
+  const [decks, setDecks] = useState<Deck[] | null>(() => peekTool<ListDecks>("list_decks")?.decks ?? null);
+  const [deckId, setDeckId] = useState<string>(ALL);
   const [nudge, setNudge] = useState<Nudge | null>(null);
   const [card, setCard] = useState<NextCard["card"]>(null);
   const [reason, setReason] = useState<NextCard["reason"]>(null);
@@ -108,10 +109,13 @@ export function Quiz({ initialDeck }: { initialDeck?: string }) {
     const hasVoice = !!recognitionCtor();
     setVoiceIn(hasVoice);
     if (!hasVoice) setTextMode(true);
+    // Read ?deck= in the browser so this page can be prerendered and prefetched like the others.
+    const wanted = new URLSearchParams(window.location.search).get("deck");
+    if (wanted) setDeckId(wanted);
     callTool<ListDecks>("list_decks")
       .then((r) => {
         setDecks(r.decks);
-        if (initialDeck && !r.decks.some((d) => d.id === initialDeck)) setDeckId(ALL);
+        if (wanted && !r.decks.some((d) => d.id === wanted)) setDeckId(ALL);
       })
       .catch((e: unknown) => setNotice(e instanceof ToolError ? e.message : "Can't load your decks. Reload the page."));
     return () => {
@@ -120,11 +124,12 @@ export function Quiz({ initialDeck }: { initialDeck?: string }) {
       rec.current?.abort();
       meter.current?.stop();
     };
-  }, [initialDeck]);
+  }, []);
 
   useEffect(() => {
-    setNudge(null);
-    callTool<Nudge>("get_study_nudge", { timezone: timezone(), ...(deckId ? { deck_id: deckId } : {}) })
+    const args = { timezone: timezone(), ...(deckId ? { deck_id: deckId } : {}) };
+    setNudge(peekTool<Nudge>("get_study_nudge", args) ?? null);
+    callTool<Nudge>("get_study_nudge", args)
       .then(setNudge)
       .catch(() => setNudge(null));
   }, [deckId]);

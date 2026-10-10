@@ -34,6 +34,22 @@ function connect(): Promise<Client> {
 
 const NETWORK = "Can't reach Viva. Check your connection and try again.";
 
+// Last result of read-only tools, so screens can draw instantly and refresh in the background.
+const CACHED = new Set(["list_decks", "get_study_nudge", "get_progress"]);
+const WRITES = new Set(["add_material", "submit_answer", "set_exam_date", "delete_card", "explain_again"]);
+const cache = new Map<string, unknown>();
+const key = (name: string, args: Record<string, unknown>) => `${name}:${JSON.stringify(args)}`;
+
+/** The last result of a read-only tool call with these exact arguments, if any. */
+export function peekTool<T>(name: string, args: Record<string, unknown> = {}): T | undefined {
+  return cache.get(key(name, args)) as T | undefined;
+}
+
+/** Warm the connection and the cache for a screen before the user opens it. */
+export function prefetchTools(calls: [string, Record<string, unknown>?][]): void {
+  for (const [name, args = {}] of calls) void callTool(name, args).catch(() => {});
+}
+
 export async function callTool<T extends { spoken: string }>(name: string, args: Record<string, unknown> = {}): Promise<T> {
   let client: Client;
   try {
@@ -53,6 +69,8 @@ export async function callTool<T extends { spoken: string }>(name: string, args:
     const code = String((result._meta as Record<string, unknown> | undefined)?.["viva/error"] ?? "error");
     throw new ToolError(text, code);
   }
+  if (CACHED.has(name)) cache.set(key(name, args), result.structuredContent);
+  else if (WRITES.has(name)) cache.clear(); // writes may change decks, due counts or progress
   return result.structuredContent as T;
 }
 

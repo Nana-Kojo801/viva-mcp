@@ -209,8 +209,22 @@ body:has(.quiz) :focus-visible {
   }
 }
 
+/* The tab bar is not part of the page change: it stays put and only recolours, never fades out. */
 .nav {
   view-transition-name: main-nav;
+}
+
+::view-transition-group(main-nav) {
+  animation: none;
+  z-index: 50;
+}
+
+::view-transition-old(main-nav) {
+  display: none;
+}
+
+::view-transition-new(main-nav) {
+  animation: none;
 }
 
 /* ---------- nav ---------- */
@@ -2363,4 +2377,11 @@ textarea.ruled {
   .scan-line {
     display: none;
   }
+}
+
+.file-reading {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  padding: 6px 10px;
 }
