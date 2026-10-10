@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { LedgerSkeleton } from "./Loading";
 import { Tally } from "./Tally";
 import { callTool, ToolError, type Deck, type ListDecks, type Progress } from "@/lib/client/mcp";
 
@@ -47,7 +48,7 @@ export function ProgressView() {
           {error}
         </p>
       )}
-      {!p && !error && <p className="muted">Loading...</p>}
+      {!p && !error && <LedgerSkeleton />}
 
       {p && (
         <>

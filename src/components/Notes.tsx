@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { WritingCards } from "./Loading";
 import { callTool, ToolError, type AddMaterial } from "@/lib/client/mcp";
 
 const MAX_FILE_BYTES = 500_000;
@@ -98,7 +99,9 @@ export function Notes() {
         </section>
       )}
 
-      {!deck && (
+      {busy && <WritingCards />}
+
+      {!deck && !busy && (
         <form className="notes-form" onSubmit={submit}>
           <label className="field">
             <span>Title</span>
@@ -130,10 +133,9 @@ export function Notes() {
               {error}
             </p>
           )}
-          <button type="submit" className="button" disabled={busy}>
-            {busy ? "Making cards..." : "Make cards"}
+          <button type="submit" className="button">
+            Make cards
           </button>
-          {busy && <p className="muted small">This takes about 10 to 30 seconds.</p>}
         </form>
       )}
     </div>

@@ -759,3 +759,199 @@ textarea.ruled {
     stroke-dashoffset: 0;
   }
 }
+
+/* ---------- loading states ---------- */
+
+.loading-caption {
+  font-size: 0.95rem;
+  color: rgb(242 245 255 / 0.72);
+}
+
+.q-skeleton {
+  display: grid;
+  gap: 18px;
+}
+
+.q-skeleton-lines {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  max-width: 22em;
+  isolation: isolate;
+}
+
+.q-skeleton-lines span {
+  position: relative;
+  display: block;
+  height: clamp(1.5rem, 5.4vw, 2.1rem);
+  border-radius: 4px;
+  background: rgb(242 245 255 / 0.12);
+  overflow: hidden;
+}
+
+/* The highlighter reads along each blank line in turn. */
+.q-skeleton-lines span::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4em;
+  width: 4em;
+  border-radius: 3px 6px 4px 7px;
+  background: var(--highlighter);
+  animation: seek 2.4s cubic-bezier(0.55, 0, 0.45, 1) infinite;
+  animation-delay: inherit;
+}
+
+@keyframes seek {
+  0% { left: -4em; }
+  33% { left: 100%; }
+  100% { left: 100%; }
+}
+
+.marking {
+  display: grid;
+  gap: 6px;
+  max-width: 16em;
+}
+
+.marking-stroke {
+  width: 100%;
+  height: 14px;
+  overflow: visible;
+}
+
+.marking-stroke path {
+  fill: none;
+  stroke: var(--chalk);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: underline 1.6s cubic-bezier(0.6, 0.1, 0.3, 1) infinite;
+}
+
+@keyframes underline {
+  0% { stroke-dashoffset: 1; opacity: 1; }
+  60% { stroke-dashoffset: 0; opacity: 1; }
+  85% { stroke-dashoffset: 0; opacity: 0; }
+  100% { stroke-dashoffset: 1; opacity: 0; }
+}
+
+.line-skeleton {
+  display: inline-block;
+  height: 0.9em;
+  vertical-align: -0.1em;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.18;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% { opacity: 0.08; }
+}
+
+.writing {
+  display: grid;
+  gap: 12px;
+}
+
+.writing-page {
+  display: grid;
+  padding: 8px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--chalk);
+}
+
+.writing-line {
+  position: relative;
+  height: 32px;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* Each ruled line fills with "ink" in turn, like a page being written. */
+.writing-line::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 9px;
+  height: 10px;
+  width: var(--w);
+  border-radius: 3px;
+  background: var(--pencil);
+  opacity: 0.22;
+  transform-origin: left;
+  transform: scaleX(0);
+  animation: write 2.7s cubic-bezier(0.5, 0, 0.3, 1) infinite;
+  animation-delay: inherit;
+}
+
+@keyframes write {
+  0% { transform: scaleX(0); opacity: 0.22; }
+  35% { transform: scaleX(1); opacity: 0.22; }
+  80% { transform: scaleX(1); opacity: 0.22; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+
+.writing-step {
+  font-family: var(--serif);
+  font-size: 1.25rem;
+}
+
+.summary-skeleton {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.summary-skeleton span,
+.ledger-day-skeleton {
+  display: block;
+  height: 1.4rem;
+  border-radius: 4px;
+  background: var(--pencil);
+  opacity: 0.12;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.ledger-day-skeleton {
+  width: 2.2em;
+  height: 0.9rem;
+}
+
+.ledger-skeleton .ledger-row {
+  animation: rule-in 500ms ease-out both;
+  border-bottom-color: var(--rule);
+}
+
+@keyframes rule-in {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .q-skeleton-lines span::after,
+  .marking-stroke path,
+  .line-skeleton,
+  .writing-line::after,
+  .summary-skeleton span,
+  .ledger-day-skeleton,
+  .ledger-skeleton .ledger-row {
+    animation: none;
+  }
+
+  .q-skeleton-lines span::after {
+    left: 0;
+    opacity: 0.5;
+  }
+
+  .marking-stroke path {
+    stroke-dashoffset: 0;
+  }
+
+  .writing-line::after {
+    transform: scaleX(1);
+  }
+}
