@@ -1,4 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import { Literata, Schibsted_Grotesk } from "next/font/google";
+import { Nav } from "@/components/Nav";
+import "./globals.css";
+
+const serif = Literata({ subsets: ["latin"], variable: "--font-serif", display: "swap" });
+const sans = Schibsted_Grotesk({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 
 export const metadata: Metadata = {
   title: "Viva",
@@ -13,8 +19,11 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" className={`${serif.variable} ${sans.variable}`}>
+      <body>
+        <main className="shell">{children}</main>
+        <Nav />
+      </body>
     </html>
   );
 }
